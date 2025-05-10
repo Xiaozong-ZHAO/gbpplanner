@@ -29,7 +29,7 @@ add_executable(gbpplanner
  src/Utils.cpp
  src/Graphics.cpp
 )
-target_link_libraries(gbpplanner PUBLIC gbp)
+target_link_libraries(gbpplanner PUBLIC gbp box2d)
 
 # 先定义目标，再链接库
 add_executable(payload_simulator

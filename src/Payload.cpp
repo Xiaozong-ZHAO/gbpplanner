@@ -628,11 +628,13 @@ int main(int argc, char *argv[]){
     globals.RUN = true;
     while (globals.RUN){
 
-        sim->eventHandler();                // Capture keypresses or mouse events             
-        sim->createOrDeleteRobots();        
-        sim->timestep();
+        // sim->eventHandler();                // Capture keypresses or mouse events             
+        // sim->createOrDeleteRobots();        
+        // sim->timestep();
+        sim->createSingleRobot();
+        
         sim->draw();
-
+        // sim->draw_payloads();
     }
 
     delete sim;

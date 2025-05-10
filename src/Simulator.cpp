@@ -8,6 +8,7 @@
 #include <Graphics.h>
 #include <Robot.h>
 #include <nanoflann.h>
+#include "box2d/box2d.h"
 
 /*******************************************************************************/
 // Raylib setup
@@ -62,6 +63,67 @@ void Simulator::draw(){
         draw_info(clock_);
     EndDrawing();    
 };
+
+void Simulator::draw_payloads(){
+    if (!globals.DISPLAY) return;
+
+    // Initialize Box2D world and create a dynamic body for the square
+    static b2World world(b2Vec2(0.0f, 0.0f)); // No gravity for a top-down view
+    static b2Body* squareBody = nullptr;
+
+    if (!squareBody) {
+        b2BodyDef bodyDef;
+        bodyDef.type = b2_dynamicBody; // Make the square dynamic so it can be pushed
+        bodyDef.position.Set(0.0f, 0.0f); // Center of the square
+        squareBody = world.CreateBody(&bodyDef);
+
+        b2PolygonShape squareShape;
+        squareShape.SetAsBox(10.0f, 10.0f); // Half-width and half-height of the square
+
+        b2FixtureDef fixtureDef;
+        fixtureDef.shape = &squareShape;
+        fixtureDef.density = 1.0f;
+        fixtureDef.friction = 0.3f;
+        squareBody->CreateFixture(&fixtureDef);
+    }
+
+    // Handle mouse interaction
+    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        Vector2 mousePos = GetMousePosition();
+        Ray ray = GetMouseRay(mousePos, graphics->camera3d);
+        Vector3 mouseGround = Vector3Add(ray.position, Vector3Scale(ray.direction, -ray.position.y / ray.direction.y));
+        b2Vec2 mouseWorld(mouseGround.x, mouseGround.z);
+
+        // Apply a force to the square body towards the mouse position
+        b2Vec2 squareCenter = squareBody->GetWorldCenter();
+        b2Vec2 force = mouseWorld - squareCenter;
+        force.Normalize();
+        force *= 500.0f; // Adjust force magnitude as needed
+        squareBody->ApplyForceToCenter(force, true);
+    }
+
+    // Step the Box2D world
+    world.Step(1.0f / 60.0f, 8, 3); // Use recommended velocity and position iterations
+
+    // Get the updated position of the square
+    b2Vec2 squarePosition = squareBody->GetPosition();
+
+    BeginDrawing();
+        ClearBackground(RAYWHITE);
+        BeginMode3D(graphics->camera3d);
+            // Draw Ground
+            DrawModel(graphics->groundModel_, graphics->groundModelpos_, 1., WHITE);
+            for (auto [rid, robot] : robots_) robot->draw();
+
+            // Draw the square at its updated position
+            DrawCube({squarePosition.x, 0.0f, squarePosition.y}, /*Length=*/20.0f, 0.1f, /*Width=*/20.0f, GRAY);
+
+            // Add a point marker at (-10, 0)
+            Vector3 pointPosition = {-10.0f, 0.0f, 0.0f};
+            DrawSphere(pointPosition, 0.5f, RED); // Draw a small red sphere as the marker
+        EndMode3D();
+    EndDrawing();
+}
 
 /*******************************************************************************/
 // Timestep loop of simulator.
@@ -179,6 +241,21 @@ void Simulator::eventHandler(){
     graphics->update_camera();
 }
 
+void Simulator::createSingleRobot(){
+    // Create a single robot at the specified position
+    std::vector<std::shared_ptr<Robot>> robots_to_create{};
+    Eigen::VectorXd starting = Eigen::VectorXd{{-10., 0., 0.,0.}};
+    Eigen::VectorXd ending = Eigen::VectorXd{{0., 0., 0.,0.}};
+    std::deque<Eigen::VectorXd> waypoints{starting, ending};
+    float robot_radius = globals.ROBOT_RADIUS;
+    Color robot_color = ColorFromHSV(0, 1., 0.75);
+    robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color));
+    for (auto& robot : robots_to_create) {
+        robots_[robot->rid_] = robot;
+        robot_positions_[robot->rid_] = std::vector<double>{robot->position_(0), robot->position_(1)};
+    }
+}
+
 /*******************************************************************************/
 // Create new robots if needed. Handles deletion of robots out of bounds. 
 // New formations must modify the vectors "robots to create" and optionally "robots_to_delete"
@@ -214,8 +291,14 @@ void Simulator::createOrDeleteRobots(){
             Color robot_color = ColorFromHSV(i*360./(float)globals.NUM_ROBOTS, 1., 0.75);
             robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color));
         }
-
-
+    } else if (globals.FORMATION == "Payload") {
+        new_robots_needed_ = false;
+        // paint a square payload
+        float payload_size = 2.0 * globals.ROBOT_RADIUS;
+        float payload_offset = 0.5 * payload_size;
+        Eigen::VectorXd centre{{0., 0., 0.,0.}};
+        // only paint a square payload, dont do anything else
+        
     } else if (globals.FORMATION=="junction"){
     // Robots in a cross-roads style junction. There is only one-way traffic, and no turning.        
         new_robots_needed_ = true;      // This is needed so that more robots can be created as the simulation progresses.

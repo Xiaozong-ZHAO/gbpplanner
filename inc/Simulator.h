@@ -63,6 +63,7 @@ public:
     // New formations must modify the vectors "robots to create" and optionally "robots_to_delete"
     // by appending (push_back()) a shared pointer to a Robot class.
     /*******************************************************************************/    
+    void createSingleRobot();
     void createOrDeleteRobots();
 
     /*******************************************************************************/
@@ -79,6 +80,8 @@ public:
     // Drawing graphics.
     /*******************************************************************************/
     void draw();
+
+    void draw_payloads();
 
     /*******************************************************************************/
     // Use a kd-tree to perform a radius search for neighbours of a robot within comms. range
