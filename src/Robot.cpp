@@ -16,10 +16,17 @@ Robot::Robot(Simulator* sim,
              int rid,
              std::deque<Eigen::VectorXd> waypoints,
              float size,
-             Color color) : FactorGraph{rid},
+             Color color,
+             b2World* world) : FactorGraph{rid},
              sim_(sim), rid_(rid),
              waypoints_(waypoints),
-             robot_radius_(size), color_(color) {
+             robot_radius_(size), color_(color),
+             physicsWorld_(world), usePhysics_(world != nullptr) {
+    
+    if (usePhysics_ && physicsWorld_){
+        // Create a physics body for the robot
+        createPhysicsBody();
+    }
 
     height_3D_ = robot_radius_;     // Height out of plane for 3d visualisation only
 
@@ -91,9 +98,19 @@ Robot::Robot(Simulator* sim,
 Robot::~Robot(){
 }
 
+void Robot::createPhysicsBody(){
+    // Create a physics body for the robot
+    b2BodyDef bodyDef;
+    bodyDef.type = b2_dynamicBody;
+    bodyDef.position.Set(position_(0), position_(1));
+    physicsBody_ = physicsWorld_->CreateBody(&bodyDef);
+}
+
 /***************************************************************************************************/
 /* Change the prior of the Current state */
 /***************************************************************************************************/
+
+
 void Robot::updateCurrent(){
     // Move plan: move plan current state by plan increment
     Eigen::VectorXd increment = ((*this)[1]->mu_ - (*this)[0]->mu_) * globals.TIMESTEP / globals.T0;
@@ -114,6 +131,12 @@ void Robot::updateHorizon(){
     Eigen::VectorXd dist_horz_to_goal = waypoints_.front()({0,1}) - horizon->mu_({0,1});                        
     Eigen::VectorXd new_vel = dist_horz_to_goal.normalized() * std::min((double)globals.MAX_SPEED, dist_horz_to_goal.norm());
     Eigen::VectorXd new_pos = horizon->mu_({0,1}) + new_vel*globals.TIMESTEP;
+    // // print the waypoints_.front()({0,1}) value
+    // std::cout << "waypoints_.front()({0,1}): " << waypoints_.front()({0,1}) << std::endl;
+    // // print the hrizon->mu_({0,1}) value
+    // std::cout << "horizon->mu_({0,1}): " << horizon->mu_({0,1}) << std::endl;
+    
+    
     
     // Update horizon state with new pos and vel
     horizon->mu_ << new_pos, new_vel;

@@ -128,6 +128,24 @@ void Simulator::draw_payloads(){
 /*******************************************************************************/
 // Timestep loop of simulator.
 /*******************************************************************************/
+void Simulator::moveRobot(){
+    // Update the robot current and horizon states by one timestep
+
+    for (int i=0; i<globals.NUM_ITERS; i++){
+        iterateGBP(1, INTERNAL, robots_);
+        // iterateGBP(1, EXTERNAL, robots_);
+    }
+    for (auto [r_id, robot] : robots_) {
+        robot->updateHorizon();
+        robot->updateCurrent();
+    }
+
+    // Increase simulation clock by one timestep
+    clock_++;
+    // print the clock_
+    if (clock_ >= globals.MAX_TIME ) globals.RUN = false;
+}
+
 void Simulator::timestep(){
 
     if (globals.SIM_MODE!=Timestep) return;
@@ -243,9 +261,14 @@ void Simulator::eventHandler(){
 
 void Simulator::createSingleRobot(){
     // Create a single robot at the specified position
+    if (!new_robots_needed_) return;
+    new_robots_needed_ = false;
     std::vector<std::shared_ptr<Robot>> robots_to_create{};
-    Eigen::VectorXd starting = Eigen::VectorXd{{-10., 0., 0.,0.}};
-    Eigen::VectorXd ending = Eigen::VectorXd{{0., 0., 0.,0.}};
+    Eigen::VectorXd starting = Eigen::VectorXd{{-25., 0., 0.,0.}};
+    Eigen::VectorXd ending = Eigen::VectorXd{{25., 0., 0.,0.}};
+    // print the starting and ending positions
+    std::cout << "Starting: " << starting.transpose() << std::endl;
+    std::cout << "Ending: " << ending.transpose() << std::endl;
     std::deque<Eigen::VectorXd> waypoints{starting, ending};
     float robot_radius = globals.ROBOT_RADIUS;
     Color robot_color = ColorFromHSV(0, 1., 0.75);
@@ -284,6 +307,9 @@ void Simulator::createOrDeleteRobots(){
                                                             {0.},{0.}};
             starting = centre + offset_from_centre;
             ending = centre - offset_from_centre;
+            // print the starting and ending positions
+            std::cout << "Starting: " << starting.transpose() << std::endl;
+            std::cout << "Ending: " << ending.transpose() << std::endl;
             std::deque<Eigen::VectorXd> waypoints{starting, ending};
             
             // Define robot radius and colour here.

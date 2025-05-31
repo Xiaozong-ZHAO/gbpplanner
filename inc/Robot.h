@@ -11,6 +11,7 @@
 #include <gbp/GBPCore.h>
 #include <gbp/Factor.h>
 #include <gbp/Factorgraph.h>
+#include "box2d/box2d.h"
 
 extern Globals globals;
 
@@ -30,7 +31,8 @@ public:
           int rid,
           std::deque<Eigen::VectorXd> waypoints,
           float size,
-          Color color);
+          Color color,
+          b2World* world = nullptr);
     ~Robot();
 
 
@@ -47,9 +49,14 @@ public:
     float height_3D_ = 0.f;                     // Height out of plane (for 3d visualisation only)
     Eigen::VectorXd position_;                  // Position of the robot (equivalent to taking the [x,y] of the current state of the robot)
 
+    b2Body* physicsBody_;
+    b2World* physicsWorld_;
+    bool usePhysics_;
+
     /****************************************/
     //Functions
     /****************************************/
+    void createPhysicsBody();
     /* Change the prior of the Current state */
     void updateCurrent();
 

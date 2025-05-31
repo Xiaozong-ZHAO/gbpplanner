@@ -19,6 +19,7 @@
 #include <nanoflann.h>
 #include <KDTreeMapOfVectorsAdaptor.h>
 #include <random>
+#include "box2d/box2d.h"
 
 class Robot;
 class Graphics;
@@ -57,7 +58,16 @@ public:
     bool symmetric_factors = false;                 // If true, when inter-robot factors need to be created between two robots,
                                                     // a pair of factors is created (one belonging to each robot). This becomes a redundancy.
 
+    b2World* physicsWorld_ = nullptr;
 
+
+    b2World* getPhysicsWorld(){
+        if (physicsWorld_ == nullptr){
+            b2Vec2 gravity(0.0f, 0.0f); // No gravity
+            physicsWorld_ = new b2World(gravity);
+        }
+        return physicsWorld_;
+    }
     /*******************************************************************************/
     // Create new robots if needed. Handles deletion of robots out of bounds. 
     // New formations must modify the vectors "robots to create" and optionally "robots_to_delete"
@@ -75,6 +85,8 @@ public:
     // Timestep loop of simulator.
     /*******************************************************************************/
     void timestep();
+
+    void moveRobot();
 
     /*******************************************************************************/
     // Drawing graphics.
