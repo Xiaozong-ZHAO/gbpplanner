@@ -347,12 +347,21 @@ void Simulator::createOrDeleteRobots(){
     } else if (globals.FORMATION == "Payload") {
         new_robots_needed_ = false;
         // paint a square payload
-        float payload_size = 2.0 * globals.ROBOT_RADIUS;
-        float payload_offset = 0.5 * payload_size;
-        Eigen::VectorXd centre{{0., 0., 0.,0.}};
-        // only paint a square payload, dont do anything else
-        
-    } else if (globals.FORMATION=="junction"){
+        float robot_radius = globals.ROBOT_RADIUS;
+        std::vector<Eigen::Vector2d> robot_positions = {
+        {-15.0, -5.0}, {-15.0, 5.0}, {-5.0, -15.0}, {5.0, -15.0}
+        };
+
+        for (int i = 0; i < robot_positions.size(); ++i) {
+            Eigen::VectorXd starting = Eigen::VectorXd{{robot_positions[i](0), robot_positions[i](1), 0., 0.}};
+            Eigen::VectorXd ending = Eigen::VectorXd{{15, 0.0, 0., 0.}};
+            std::deque<Eigen::Vector2d> waypoints{starting, ending};
+
+            Color robot_color = ColorFromHSV(i*90., 1., 0.75); 
+            robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
+        }
+
+    }else if (globals.FORMATION=="junction"){
     // Robots in a cross-roads style junction. There is only one-way traffic, and no turning.        
         new_robots_needed_ = true;      // This is needed so that more robots can be created as the simulation progresses.
         if (clock_%20==0){              // Arbitrary condition on the simulation time to create new robots

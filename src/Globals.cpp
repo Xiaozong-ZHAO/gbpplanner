@@ -43,6 +43,12 @@ void Globals::parse_global_args(std::ifstream& config_file){
     SIGMA_FACTOR_OBSTACLE = j["SIGMA_FACTOR_OBSTACLE"];
     NUM_ITERS = j["NUM_ITERS"];
 
+    // Payload parameters
+    PAYLOAD_ENABLED = static_cast<bool>((int)j["PAYLOAD_ENABLED"]);
+    PAYLOAD_WIDTH = j["PAYLOAD_WIDTH"];
+    PAYLOAD_HEIGHT = j["PAYLOAD_HEIGHT"];
+    PAYLOAD_DENSITY = j["PAYLOAD_DENSITY"];
+
 }
 
 Globals::Globals(){};

@@ -58,6 +58,12 @@ class Globals {
     int NUM_ITERS;                                          // Number of iterations of GBP per timestep
     float DAMPING = 0.;                                     // Damping amount (not used in this work)
     
+    // Payload parameters
+    bool PAYLOAD_ENABLED;
+    float PAYLOAD_WIDTH;
+    float PAYLOAD_HEIGHT;
+    float PAYLOAD_DENSITY;
+    
     Globals();
     int parse_global_args(DArgs::DArgs& dargs);
     void parse_global_args(std::ifstream& config_file);
