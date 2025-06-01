@@ -51,6 +51,12 @@ Simulator::~Simulator(){
     delete treeOfRobots_;
     int n = robots_.size();
     for (int i = 0; i < n; ++i) robots_.erase(i);
+
+    if(physicsWorld_) {
+        delete physicsWorld_;
+        physicsWorld_ = nullptr;
+    }
+
     if (globals.DISPLAY) {
         delete graphics;
         CloseWindow();
@@ -98,7 +104,7 @@ void Simulator::draw_payloads(){
 
         b2FixtureDef fixtureDef;
         fixtureDef.shape = &squareShape;
-        fixtureDef.density = 1.0f;
+        fixtureDef.density = 0.05f;
         fixtureDef.friction = 0.3f;
         squareBody->CreateFixture(&fixtureDef);
     }
@@ -348,14 +354,15 @@ void Simulator::createOrDeleteRobots(){
         new_robots_needed_ = false;
         // paint a square payload
         float robot_radius = globals.ROBOT_RADIUS;
-        std::vector<Eigen::Vector2d> robot_positions = {
+        std::vector<std::pair<double, double>> positions = {
         {-15.0, -5.0}, {-15.0, 5.0}, {-5.0, -15.0}, {5.0, -15.0}
         };
 
-        for (int i = 0; i < robot_positions.size(); ++i) {
-            Eigen::VectorXd starting = Eigen::VectorXd{{robot_positions[i](0), robot_positions[i](1), 0., 0.}};
+        for (int i = 0; i < positions.size(); ++i) {
+            Eigen::VectorXd starting(4);
+            starting << positions[i].first, positions[i].second, 0.0, 0.0;
             Eigen::VectorXd ending = Eigen::VectorXd{{15, 0.0, 0., 0.}};
-            std::deque<Eigen::Vector2d> waypoints{starting, ending};
+            std::deque<Eigen::VectorXd> waypoints{starting, ending};
 
             Color robot_color = ColorFromHSV(i*90., 1., 0.75); 
             robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
@@ -451,4 +458,11 @@ void Simulator::deleteRobot(std::shared_ptr<Robot> robot){
     robot_positions_.erase(robot->rid_);
 }
 
+void Simulator::deletePayload(int payload_id) {
+    payloads_.erase(payload_id);
+}
 
+std::shared_ptr<Payload> Simulator::getPayload(int payload_id) {
+    auto it = payloads_.find(payload_id);
+    return (it != payloads_.end()) ? it->second : nullptr;
+}

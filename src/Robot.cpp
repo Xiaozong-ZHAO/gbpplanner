@@ -22,11 +22,6 @@ Robot::Robot(Simulator* sim,
              waypoints_(waypoints),
              robot_radius_(size), color_(color),
              physicsWorld_(world), usePhysics_(world != nullptr) {
-    
-    if (usePhysics_ && physicsWorld_){
-        // Create a physics body for the robot
-        createPhysicsBody();
-    }
 
     height_3D_ = robot_radius_;     // Height out of plane for 3d visualisation only
 
@@ -35,6 +30,10 @@ Robot::Robot(Simulator* sim,
     Eigen::VectorXd start = position_ = waypoints_[0];
     waypoints_.pop_front();                             
     auto goal = (waypoints_.size()>0) ? waypoints_[0] : start;
+
+    if (usePhysics_ && physicsWorld_) {
+        createPhysicsBody();
+    }
 
     // Initialise the horzion in the direction of the goal, at a distance T_HORIZON * MAX_SPEED from the start.
     Eigen::VectorXd start2goal = goal - start;
@@ -99,6 +98,17 @@ Robot::~Robot(){
 }
 
 void Robot::createPhysicsBody(){
+
+    if (!physicsWorld_) {
+        std::cerr << "Error: physicsWorld_ is null." << std::endl;
+        return;
+    }
+
+    if (position_.size() < 2) {
+        std::cerr << "Error: position_.size() is" << position_.size() << ", expected at least 2." << std::endl;
+        return;
+    }
+
     // Create a physics body for the robot
     b2BodyDef bodyDef;
     bodyDef.type = b2_dynamicBody;
