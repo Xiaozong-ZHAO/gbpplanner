@@ -7,8 +7,10 @@
 #include <Simulator.h>
 #include <Graphics.h>
 #include <Robot.h>
+#include <Payload.h>
 #include <nanoflann.h>
 #include "box2d/box2d.h"
+
 
 /*******************************************************************************/
 // Raylib setup
@@ -31,7 +33,16 @@ Simulator::Simulator(){
     // However for calculation purposes the image needs to be inverted.
     ImageColorInvert(&obstacleImg);
     graphics = new Graphics(obstacleImg);
+
+    if (globals.FORMATION == "Payload"){
+        createPayload(Eigen::Vector2d(0., 0.), 20., 20.);
+    }
 };
+
+void Simulator::createPayload(Eigen::Vector2d position, float width, float height) {
+    auto payload = std::make_shared<Payload>(this, next_payload_id_++, position, width, height);
+    payloads_[payload->payload_id_] = payload;
+}
 
 /*******************************************************************************/
 // Destructor
@@ -59,6 +70,11 @@ void Simulator::draw(){
             DrawModel(graphics->groundModel_, graphics->groundModelpos_, 1., WHITE);
             // Draw Robots
             for (auto [rid, robot] : robots_) robot->draw();
+
+            // Draw Payloads
+            for (auto [pid, payload]: payloads_) {
+                payload->draw();
+            }
         EndMode3D();
         draw_info(clock_);
     EndDrawing();    
@@ -172,6 +188,17 @@ void Simulator::timestep(){
         robot->updateCurrent();
     }
 
+    if (physicsWorld_){
+        physicsWorld_->Step(globals.TIMESTEP, 8, 3);
+        for (auto [r_id, robot]: robots_){
+            robot->syncPhysicsToLogical();
+        }
+
+        for (auto [p_id, payload]: payloads_){
+            payload->update();
+        }
+    }
+
     // Increase simulation clock by one timestep
     clock_++;
     if (clock_ >= globals.MAX_TIME ) globals.RUN = false;
@@ -272,7 +299,7 @@ void Simulator::createSingleRobot(){
     std::deque<Eigen::VectorXd> waypoints{starting, ending};
     float robot_radius = globals.ROBOT_RADIUS;
     Color robot_color = ColorFromHSV(0, 1., 0.75);
-    robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color));
+    robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
     for (auto& robot : robots_to_create) {
         robots_[robot->rid_] = robot;
         robot_positions_[robot->rid_] = std::vector<double>{robot->position_(0), robot->position_(1)};
@@ -315,7 +342,7 @@ void Simulator::createOrDeleteRobots(){
             // Define robot radius and colour here.
             float robot_radius = globals.ROBOT_RADIUS;
             Color robot_color = ColorFromHSV(i*360./(float)globals.NUM_ROBOTS, 1., 0.75);
-            robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color));
+            robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
         }
     } else if (globals.FORMATION == "Payload") {
         new_robots_needed_ = false;
@@ -344,7 +371,7 @@ void Simulator::createOrDeleteRobots(){
             std::deque<Eigen::VectorXd> waypoints{starting, ending};
             float robot_radius = globals.ROBOT_RADIUS;
             Color robot_color = DARKGREEN;
-            robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color));
+            robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
         }
 
         // Delete robots if out of bounds
@@ -378,7 +405,7 @@ void Simulator::createOrDeleteRobots(){
             std::deque<Eigen::VectorXd> waypoints{starting, turning, ending};
             float robot_radius = globals.ROBOT_RADIUS;
             Color robot_color = ColorFromHSV(turn*120., 1., 0.75);
-            robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color));
+            robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
         }
         
         // Delete robots if out of bounds

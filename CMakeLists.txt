@@ -28,17 +28,19 @@ add_executable(gbpplanner
  src/Simulator.cpp
  src/Utils.cpp
  src/Graphics.cpp
+ src/Payload.cpp
 )
 target_link_libraries(gbpplanner PUBLIC gbp box2d)
 
 # 先定义目标，再链接库
 add_executable(payload_simulator
- src/Payload.cpp
+ src/entry.cpp
  src/Globals.cpp
  src/Robot.cpp
  src/Simulator.cpp
  src/Utils.cpp
  src/Graphics.cpp
+ src/Payload.cpp
 )
 
 # 包含头文件目录

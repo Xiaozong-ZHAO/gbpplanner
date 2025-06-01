@@ -104,6 +104,21 @@ void Robot::createPhysicsBody(){
     bodyDef.type = b2_dynamicBody;
     bodyDef.position.Set(position_(0), position_(1));
     physicsBody_ = physicsWorld_->CreateBody(&bodyDef);
+
+    // Create a circle collision shape for the robot
+    b2CircleShape circleShape;
+    circleShape.m_radius = robot_radius_;
+
+    // Create a fixture definition for the circle shape
+    b2FixtureDef fixtureDef;
+    fixtureDef.shape = &circleShape;
+    fixtureDef.density = 0.1f;
+    fixtureDef.friction = 0.5f;
+    fixtureDef.restitution = 0.1f;
+
+    physicsBody_->CreateFixture(&fixtureDef);
+    
+    physicsBody_->SetLinearDamping(0.1f);
 }
 
 /***************************************************************************************************/
@@ -119,7 +134,30 @@ void Robot::updateCurrent(){
     // Real pose update
     position_ = position_ + increment;
 
+    if (usePhysics_ && physicsBody_){
+        // Update the physics body position to match the logical position
+        syncLogicalToPhysics();
+    }
+
 };
+
+void Robot::syncLogicalToPhysics(){
+    if (!usePhysics_ || !physicsBody_) return;
+
+    physicsBody_->SetTransform(b2Vec2(position_(0), position_(1)), 0.0f);
+    Eigen::VectorXd increment = ((*this)[1]->mu_ - (*this)[0]->mu_) * globals.TIMESTEP / globals.T0;
+    b2Vec2 desiredVel(increment(0) / globals.TIMESTEP, increment(1) / globals.TIMESTEP);
+    physicsBody_->SetLinearVelocity(desiredVel);
+}
+
+void Robot::syncPhysicsToLogical(){
+    if (!usePhysics_ || !physicsBody_) return;
+
+    b2Vec2 phyPos = physicsBody_->GetPosition();
+    position_[0] = phyPos.x;
+    position_[1] = phyPos.y;
+
+}
 
 /***************************************************************************************************/
 /* Change the prior of the Horizon state */

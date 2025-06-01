@@ -20,10 +20,12 @@
 #include <KDTreeMapOfVectorsAdaptor.h>
 #include <random>
 #include "box2d/box2d.h"
+#include "Payload.h"
 
 class Robot;
 class Graphics;
 class TreeOfRobots;
+class Payload;
 
 /************************************************************************************/
 // The main Simulator. This is where the magic happens.
@@ -32,6 +34,7 @@ class Simulator {
 public:
     friend class Robot;
     friend class Factor;
+    friend class Payload;
 
     // Constructor
     Simulator();
@@ -52,13 +55,16 @@ public:
     int next_rid_ = 0;                              // New robots will use this rid. It should be ++ incremented when this happens
     int next_vid_ = 0;                              // New variables will use this vid. It should be ++ incremented when this happens
     int next_fid_ = 0;                              // New factors will use this fid. It should be ++ incremented when this happens
+    int next_payload_id_ = 0;
     uint32_t clock_ = 0;                            // Simulation clock (timesteps)                   
     std::map<int, std::shared_ptr<Robot>> robots_;  // Map containing smart pointers to all robots, accessed by their rid.
+    std::map<int, std::shared_ptr<Payload>> payloads_; // Map containing smart pointers to all payloads, accessed by their pid.
     bool new_robots_needed_ = true;                 // Whether or not to create new robots. (Some formations are dynamicaly changing)
     bool symmetric_factors = false;                 // If true, when inter-robot factors need to be created between two robots,
                                                     // a pair of factors is created (one belonging to each robot). This becomes a redundancy.
 
     b2World* physicsWorld_ = nullptr;
+    
 
 
     b2World* getPhysicsWorld(){
@@ -75,6 +81,10 @@ public:
     /*******************************************************************************/    
     void createSingleRobot();
     void createOrDeleteRobots();
+
+    void createPayload(Eigen::Vector2d position, float width, float height);
+    void deletePayload(int payload_id);
+    std::shared_ptr<Payload> getPayload(int payload_id);
 
     /*******************************************************************************/
     // Set a proportion of robots to not perform inter-robot communications

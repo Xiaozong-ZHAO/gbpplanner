@@ -7,6 +7,8 @@
 #include <memory>
 #include <vector>
 #include <deque>
+#include <raylib.h>
+#include <Eigen/Dense>
 #include <Utils.h>
 #include <gbp/GBPCore.h>
 #include <gbp/Factor.h>
@@ -56,6 +58,8 @@ public:
     /****************************************/
     //Functions
     /****************************************/
+    void syncPhysicsToLogical();
+    void syncLogicalToPhysics();
     void createPhysicsBody();
     /* Change the prior of the Current state */
     void updateCurrent();
