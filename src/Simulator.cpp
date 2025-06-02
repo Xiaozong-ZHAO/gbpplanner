@@ -104,8 +104,8 @@ void Simulator::draw_payloads(){
 
         b2FixtureDef fixtureDef;
         fixtureDef.shape = &squareShape;
-        fixtureDef.density = 0.05f;
-        fixtureDef.friction = 0.3f;
+        fixtureDef.density = 0.01f;
+        fixtureDef.friction = 0.1f;
         squareBody->CreateFixture(&fixtureDef);
     }
 
@@ -176,6 +176,11 @@ void Simulator::timestep(){
     calculateRobotNeighbours(robots_);
     for (auto [r_id, robot] : robots_) {
         robot->updateInterrobotFactors();
+        std::cout << "Robot " << robot->rid_ << " physical position: " << std::endl;
+        std::cout << robot->position_.transpose() << std::endl;
+
+        std::cout << "Robot " << robot->rid_ << " factor position: " << std::endl;
+        std::cout << robot->getVar(0)->mu_.transpose() << std::endl;
     }
 
     // If the communications failure rate is non-zero, activate/deactivate robot comms
