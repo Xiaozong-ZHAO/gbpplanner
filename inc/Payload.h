@@ -15,7 +15,7 @@ class Payload {
                 Eigen::Vector2d initial_position,
                 float width,
                 float height,
-                float density = 1.0f,
+                float density = 0.3f,
                 Color color = GRAY);
         ~Payload();
 

@@ -86,66 +86,66 @@ void Simulator::draw(){
     EndDrawing();    
 };
 
-void Simulator::draw_payloads(){
-    if (!globals.DISPLAY) return;
+// void Simulator::draw_payloads(){
+//     if (!globals.DISPLAY) return;
 
-    // Initialize Box2D world and create a dynamic body for the square
-    static b2World world(b2Vec2(0.0f, 0.0f)); // No gravity for a top-down view
-    static b2Body* squareBody = nullptr;
+//     // Initialize Box2D world and create a dynamic body for the square
+//     static b2World world(b2Vec2(0.0f, 0.0f)); // No gravity for a top-down view
+//     static b2Body* squareBody = nullptr;
 
-    if (!squareBody) {
-        b2BodyDef bodyDef;
-        bodyDef.type = b2_dynamicBody; // Make the square dynamic so it can be pushed
-        bodyDef.position.Set(0.0f, 0.0f); // Center of the square
-        squareBody = world.CreateBody(&bodyDef);
+//     if (!squareBody) {
+//         b2BodyDef bodyDef;
+//         bodyDef.type = b2_dynamicBody; // Make the square dynamic so it can be pushed
+//         bodyDef.position.Set(0.0f, 0.0f); // Center of the square
+//         squareBody = world.CreateBody(&bodyDef);
 
-        b2PolygonShape squareShape;
-        squareShape.SetAsBox(10.0f, 10.0f); // Half-width and half-height of the square
+//         b2PolygonShape squareShape;
+//         squareShape.SetAsBox(10.0f, 10.0f); // Half-width and half-height of the square
 
-        b2FixtureDef fixtureDef;
-        fixtureDef.shape = &squareShape;
-        fixtureDef.density = 0.01f;
-        fixtureDef.friction = 0.1f;
-        squareBody->CreateFixture(&fixtureDef);
-    }
+//         b2FixtureDef fixtureDef;
+//         fixtureDef.shape = &squareShape;
+//         fixtureDef.density = 0.01f;
+//         fixtureDef.friction = 0.1f;
+//         squareBody->CreateFixture(&fixtureDef);
+//     }
 
-    // Handle mouse interaction
-    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-        Vector2 mousePos = GetMousePosition();
-        Ray ray = GetMouseRay(mousePos, graphics->camera3d);
-        Vector3 mouseGround = Vector3Add(ray.position, Vector3Scale(ray.direction, -ray.position.y / ray.direction.y));
-        b2Vec2 mouseWorld(mouseGround.x, mouseGround.z);
+//     // Handle mouse interaction
+//     if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+//         Vector2 mousePos = GetMousePosition();
+//         Ray ray = GetMouseRay(mousePos, graphics->camera3d);
+//         Vector3 mouseGround = Vector3Add(ray.position, Vector3Scale(ray.direction, -ray.position.y / ray.direction.y));
+//         b2Vec2 mouseWorld(mouseGround.x, mouseGround.z);
 
-        // Apply a force to the square body towards the mouse position
-        b2Vec2 squareCenter = squareBody->GetWorldCenter();
-        b2Vec2 force = mouseWorld - squareCenter;
-        force.Normalize();
-        force *= 500.0f; // Adjust force magnitude as needed
-        squareBody->ApplyForceToCenter(force, true);
-    }
+//         // Apply a force to the square body towards the mouse position
+//         b2Vec2 squareCenter = squareBody->GetWorldCenter();
+//         b2Vec2 force = mouseWorld - squareCenter;
+//         force.Normalize();
+//         force *= 500.0f; // Adjust force magnitude as needed
+//         squareBody->ApplyForceToCenter(force, true);
+//     }
 
-    // Step the Box2D world
-    world.Step(1.0f / 60.0f, 8, 3); // Use recommended velocity and position iterations
+//     // Step the Box2D world
+//     world.Step(1.0f / 60.0f, 8, 3); // Use recommended velocity and position iterations
 
-    // Get the updated position of the square
-    b2Vec2 squarePosition = squareBody->GetPosition();
+//     // Get the updated position of the square
+//     b2Vec2 squarePosition = squareBody->GetPosition();
 
-    BeginDrawing();
-        ClearBackground(RAYWHITE);
-        BeginMode3D(graphics->camera3d);
-            // Draw Ground
-            DrawModel(graphics->groundModel_, graphics->groundModelpos_, 1., WHITE);
-            for (auto [rid, robot] : robots_) robot->draw();
+//     BeginDrawing();
+//         ClearBackground(RAYWHITE);
+//         BeginMode3D(graphics->camera3d);
+//             // Draw Ground
+//             DrawModel(graphics->groundModel_, graphics->groundModelpos_, 1., WHITE);
+//             for (auto [rid, robot] : robots_) robot->draw();
 
-            // Draw the square at its updated position
-            DrawCube({squarePosition.x, 0.0f, squarePosition.y}, /*Length=*/20.0f, 0.1f, /*Width=*/20.0f, GRAY);
+//             // Draw the square at its updated position
+//             DrawCube({squarePosition.x, 0.0f, squarePosition.y}, /*Length=*/20.0f, 0.1f, /*Width=*/20.0f, GRAY);
 
-            // Add a point marker at (-10, 0)
-            Vector3 pointPosition = {-10.0f, 0.0f, 0.0f};
-            DrawSphere(pointPosition, 0.5f, RED); // Draw a small red sphere as the marker
-        EndMode3D();
-    EndDrawing();
-}
+//             // Add a point marker at (-10, 0)
+//             Vector3 pointPosition = {-10.0f, 0.0f, 0.0f};
+//             DrawSphere(pointPosition, 0.5f, RED); // Draw a small red sphere as the marker
+//         EndMode3D();
+//     EndDrawing();
+// }
 
 /*******************************************************************************/
 // Timestep loop of simulator.
@@ -360,13 +360,17 @@ void Simulator::createOrDeleteRobots(){
         // paint a square payload
         float robot_radius = globals.ROBOT_RADIUS;
         std::vector<std::pair<double, double>> positions = {
-        {-15.0, -5.0}, {-15.0, 5.0}, {-5.0, -15.0}, {5.0, -15.0}
+        {-15.0, 5.0}, {-15.0, -5.0}, {-15.0, -10}, {-15.0, -15.0}
+        };
+        std::vector<std::pair<double, double>> destination = {
+        {15.0, 5.0}, {15.0, -5.0}, {15.0, -10}, {15.0, -15.0}
         };
 
         for (int i = 0; i < positions.size(); ++i) {
             Eigen::VectorXd starting(4);
             starting << positions[i].first, positions[i].second, 0.0, 0.0;
-            Eigen::VectorXd ending = Eigen::VectorXd{{15, 0.0, 0., 0.}};
+            Eigen::VectorXd ending(4);
+            ending << destination[i].first, destination[i].second, 0.0, 0.0;
             std::deque<Eigen::VectorXd> waypoints{starting, ending};
 
             Color robot_color = ColorFromHSV(i*90., 1., 0.75); 
