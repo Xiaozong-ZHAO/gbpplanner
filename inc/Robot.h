@@ -15,7 +15,7 @@
 #include <gbp/Factorgraph.h>
 #include "box2d/box2d.h"
 
-extern Globals globals;
+// extern Globals globals;
 
 /***************************************************************************/
 // Creates a robot. Inputs required are :

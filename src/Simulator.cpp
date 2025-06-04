@@ -35,12 +35,12 @@ Simulator::Simulator(){
     graphics = new Graphics(obstacleImg);
 
     if (globals.FORMATION == "Payload"){
-        createPayload(Eigen::Vector2d(0., 0.), 20., 20.);
+        createPayload(Eigen::Vector2d(0., 0.), globals.PAYLOAD_WIDTH, globals.PAYLOAD_HEIGHT);
     }
 };
 
 void Simulator::createPayload(Eigen::Vector2d position, float width, float height) {
-    auto payload = std::make_shared<Payload>(this, next_payload_id_++, position, width, height);
+    auto payload = std::make_shared<Payload>(this, next_payload_id_++, position, width, height, globals.PAYLOAD_DENSITY);
     payloads_[payload->payload_id_] = payload;
 }
 
@@ -85,67 +85,6 @@ void Simulator::draw(){
         draw_info(clock_);
     EndDrawing();    
 };
-
-// void Simulator::draw_payloads(){
-//     if (!globals.DISPLAY) return;
-
-//     // Initialize Box2D world and create a dynamic body for the square
-//     static b2World world(b2Vec2(0.0f, 0.0f)); // No gravity for a top-down view
-//     static b2Body* squareBody = nullptr;
-
-//     if (!squareBody) {
-//         b2BodyDef bodyDef;
-//         bodyDef.type = b2_dynamicBody; // Make the square dynamic so it can be pushed
-//         bodyDef.position.Set(0.0f, 0.0f); // Center of the square
-//         squareBody = world.CreateBody(&bodyDef);
-
-//         b2PolygonShape squareShape;
-//         squareShape.SetAsBox(10.0f, 10.0f); // Half-width and half-height of the square
-
-//         b2FixtureDef fixtureDef;
-//         fixtureDef.shape = &squareShape;
-//         fixtureDef.density = 0.01f;
-//         fixtureDef.friction = 0.1f;
-//         squareBody->CreateFixture(&fixtureDef);
-//     }
-
-//     // Handle mouse interaction
-//     if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-//         Vector2 mousePos = GetMousePosition();
-//         Ray ray = GetMouseRay(mousePos, graphics->camera3d);
-//         Vector3 mouseGround = Vector3Add(ray.position, Vector3Scale(ray.direction, -ray.position.y / ray.direction.y));
-//         b2Vec2 mouseWorld(mouseGround.x, mouseGround.z);
-
-//         // Apply a force to the square body towards the mouse position
-//         b2Vec2 squareCenter = squareBody->GetWorldCenter();
-//         b2Vec2 force = mouseWorld - squareCenter;
-//         force.Normalize();
-//         force *= 500.0f; // Adjust force magnitude as needed
-//         squareBody->ApplyForceToCenter(force, true);
-//     }
-
-//     // Step the Box2D world
-//     world.Step(1.0f / 60.0f, 8, 3); // Use recommended velocity and position iterations
-
-//     // Get the updated position of the square
-//     b2Vec2 squarePosition = squareBody->GetPosition();
-
-//     BeginDrawing();
-//         ClearBackground(RAYWHITE);
-//         BeginMode3D(graphics->camera3d);
-//             // Draw Ground
-//             DrawModel(graphics->groundModel_, graphics->groundModelpos_, 1., WHITE);
-//             for (auto [rid, robot] : robots_) robot->draw();
-
-//             // Draw the square at its updated position
-//             DrawCube({squarePosition.x, 0.0f, squarePosition.y}, /*Length=*/20.0f, 0.1f, /*Width=*/20.0f, GRAY);
-
-//             // Add a point marker at (-10, 0)
-//             Vector3 pointPosition = {-10.0f, 0.0f, 0.0f};
-//             DrawSphere(pointPosition, 0.5f, RED); // Draw a small red sphere as the marker
-//         EndMode3D();
-//     EndDrawing();
-// }
 
 /*******************************************************************************/
 // Timestep loop of simulator.

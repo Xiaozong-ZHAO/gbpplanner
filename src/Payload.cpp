@@ -1,12 +1,12 @@
 #include <Payload.h>
 #include <Simulator.h>
-#include <Globals.h>
+// #include <Globals.h>
 
 #include <raylib.h>
 #include <raymath.h>  // 数学函数
 #include <rlgl.h>     // 低级OpenGL包装函数
 
-extern Globals globals;
+// extern Globals globals;
 
 Payload::Payload(Simulator* sim,
                  int payload_id,

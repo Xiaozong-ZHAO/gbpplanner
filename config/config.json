@@ -31,8 +31,8 @@
 
   "####": "Payload parameters",
   "PAYLOAD_ENABLED": true,
-  "PAYLOAD_WIDTH": 10.0,
-  "PAYLOAD_HEIGHT": 10.0,
-  "PAYLOAD_DENSITY": 1.0
+  "PAYLOAD_WIDTH": 20.0,
+  "PAYLOAD_HEIGHT": 20.0,
+  "PAYLOAD_DENSITY": 0.3
 
 }
