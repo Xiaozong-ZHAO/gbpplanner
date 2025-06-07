@@ -53,7 +53,7 @@ void Payload::createPhysicsBody(float density){
     b2FixtureDef fixtureDef;
     fixtureDef.shape = &boxShape;
     fixtureDef.density = density;
-    fixtureDef.friction = 0.05f;
+    fixtureDef.friction = globals.PAYLOAD_FRICTION;
     fixtureDef.restitution = 0.1f;
     
     physicsBody_->CreateFixture(&fixtureDef);
@@ -73,14 +73,14 @@ void Payload::update() {
 }
 
 void Payload::draw() {
-    // 绘制3D立方体表示payload
-    Vector3 position3D = {position_.x(), 0.5f, position_.y()};  // 稍微抬高一点
+    float x = static_cast<float>(position_.x());
+    float y = static_cast<float>(position_.y());
+    Vector3 position3D = {x, 0.5f, y};
     Vector3 size = {width_, 1.0f, height_};
     
-    // 使用旋转矩阵绘制
     rlPushMatrix();
     rlTranslatef(position3D.x, position3D.y, position3D.z);
-    rlRotatef(rotation_ * RAD2DEG, 0, 1, 0);  // 绕Y轴旋转
+    rlRotatef(- rotation_ * RAD2DEG, 0, 1, 0);
     DrawCube({0, 0, 0}, size.x, size.y, size.z, color_);
     DrawCubeWires({0, 0, 0}, size.x, size.y, size.z, BLACK);
     rlPopMatrix();

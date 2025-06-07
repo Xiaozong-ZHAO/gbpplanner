@@ -305,7 +305,7 @@ void Simulator::createOrDeleteRobots(){
         {15.0, 5.0}, {15.0, -5.0}, {15.0, -10}, {15.0, -15.0}
         };
 
-        for (int i = 0; i < positions.size(); ++i) {
+        for (int i = 0; i < globals.NUM_ROBOTS; ++i) {
             Eigen::VectorXd starting(4);
             starting << positions[i].first, positions[i].second, 0.0, 0.0;
             Eigen::VectorXd ending(4);

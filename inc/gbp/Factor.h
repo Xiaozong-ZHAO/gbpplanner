@@ -20,7 +20,7 @@ using Eigen::last;
 class Variable;     // Forward declaration
 
 // Types of factors defined. Default is DEFAULT_FACTOR
-enum FactorType {DEFAULT_FACTOR, DYNAMICS_FACTOR, INTERROBOT_FACTOR, OBSTACLE_FACTOR};
+enum FactorType {DEFAULT_FACTOR, DYNAMICS_FACTOR, INTERROBOT_FACTOR, OBSTACLE_FACTOR, PAYLOAD_FACTOR};
 /*****************************************************************************************/
 // Factor used in GBP
 /*****************************************************************************************/
@@ -100,6 +100,20 @@ class DynamicsFactor: public Factor {
 // position at the same timestep (collision). This factor is created between variables of two robots.
 // The factor has 0 energy if the variables are further away than the safety distance. skip_ = true in this case.
 /********************************************************************************************/
+// class PayloadFactor: public Factor {
+//     public:
+//     // Change the parameters below:
+//     double safety_distance_;
+//     PayloadFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
+//         float sigma, const Eigen::VectorXd& measurement,
+//         float robot_radius);
+    
+//         Eigen::MatrixXd h_func_(const Eigen::VectorXd& X);
+//         Eigen::MatrixXd J_func_(const Eigen::VectorXd& X);
+//         bool skip_factor();
+
+// };
+
 class InterrobotFactor: public Factor {
     public:
     double safety_distance_;

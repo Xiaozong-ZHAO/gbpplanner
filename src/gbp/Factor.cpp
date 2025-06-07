@@ -227,6 +227,16 @@ Eigen::MatrixXd DynamicsFactor::J_func_(const Eigen::VectorXd& X){
 // position at the same timestep (collision). This factor is created between variables of two robots.
 // The factor has 0 energy if the variables are further away than the safety distance. skip_ = true in this case.
 /********************************************************************************************/
+// PayloadFactor::PayloadFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
+//     float sigma, const Eigen::VectorXd& measurement,
+//     float robot_radius)
+//     : Factor{f_id, r_id, variables, sigma, measurement} {
+//         factor_type_ = PAYLOAD_FACTOR;
+//         // Change the parameters below:
+//         float eps = 0.2 * robot_radius;
+//         this->safety_distance_ = 2*robot_radius + eps; // Safety distance between two robots
+//         this->delta_jac = 1e-2;
+//     };
 
 InterrobotFactor::InterrobotFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
     float sigma, const Eigen::VectorXd& measurement, 
