@@ -22,9 +22,15 @@ class Payload {
     // Fundamental properties
     int payload_id_;
     Eigen::Vector2d position_;
+    Eigen::Vector2d target_position_;
     float width_, height_;
     float rotation_;
     Color color_;
+
+    // Task related properties
+    bool task_completed_;              
+    float target_tolerance_;           
+    Eigen::Vector2d velocity_;         
 
     // Box2D properties
     b2Body* physicsBody_;
@@ -36,6 +42,13 @@ class Payload {
     
     // Create the physical entity
     void createPhysicsBody(float density);
+
+    void setTarget(const Eigen::Vector2d& target);
+    bool isAtTarget() const;
+    Eigen::Vector2d getDistanceToTarget() const;
+    float getDistanceToTargetMagnitude() const;
+    Eigen::Vector2d getRequiredPushDirection() const;
+    bool shouldStopPushing() const;
     
     Eigen::Vector2d getPosition() const;
     float getRotation() const;

@@ -18,15 +18,18 @@ Payload::Payload(Simulator* sim,
     sim_(sim),
     payload_id_(payload_id),
     position_(initial_position),
+    target_position_(initial_position), // 默认目标是初始位置
     width_(width),
     height_(height),
     color_(color),
     rotation_(0.0f),
-    physicsBody_(nullptr){
+    physicsBody_(nullptr),
+    task_completed_(false),
+    target_tolerance_(2.0f), // 默认容忍距离
+    velocity_(Eigen::Vector2d::Zero()) {
         physicsWorld_ = sim->getPhysicsWorld();
         if (physicsWorld_){
             createPhysicsBody(density);
-
         }
     }
 Payload::~Payload(){
@@ -78,12 +81,27 @@ void Payload::draw() {
     Vector3 position3D = {x, 0.5f, y};
     Vector3 size = {width_, 1.0f, height_};
     
+    // 根据任务状态选择颜色
+    Color drawColor = task_completed_ ? GREEN : color_;
+    
     rlPushMatrix();
     rlTranslatef(position3D.x, position3D.y, position3D.z);
     rlRotatef(- rotation_ * RAD2DEG, 0, 1, 0);
-    DrawCube({0, 0, 0}, size.x, size.y, size.z, color_);
+    DrawCube({0, 0, 0}, size.x, size.y, size.z, drawColor);
     DrawCubeWires({0, 0, 0}, size.x, size.y, size.z, BLACK);
     rlPopMatrix();
+    
+    // 绘制目标位置
+    Vector3 targetPos3D = {static_cast<float>(target_position_.x()), 0.1f, static_cast<float>(target_position_.y())};
+    DrawCube(targetPos3D, size.x * 1.1f, 0.2f, size.z * 1.1f, ColorAlpha(RED, 0.3f));
+    DrawCubeWires(targetPos3D, size.x * 1.1f, 0.2f, size.z * 1.1f, RED);
+    
+    // 绘制payload到目标的连线
+    if (!task_completed_) {
+        Vector3 start = {x, 0.5f, y};
+        Vector3 end = {static_cast<float>(target_position_.x()), 0.5f, static_cast<float>(target_position_.y())};
+        DrawLine3D(start, end, ColorAlpha(RED, 0.5f));
+    }
 }
 
 

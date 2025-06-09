@@ -295,25 +295,109 @@ void Simulator::createOrDeleteRobots(){
             robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
         }
     } else if (globals.FORMATION == "Payload") {
-        new_robots_needed_ = false;
-        // paint a square payload
-        float robot_radius = globals.ROBOT_RADIUS;
-        std::vector<std::pair<double, double>> positions = {
-        {-15.0, 5.0}, {-15.0, -5.0}, {-15.0, -10}, {-15.0, -15.0}
-        };
-        std::vector<std::pair<double, double>> destination = {
-        {15.0, 5.0}, {15.0, -5.0}, {15.0, -10}, {15.0, -15.0}
-        };
+    new_robots_needed_ = false;
+    float robot_radius = globals.ROBOT_RADIUS;
+    
+    // 获取payload信息
+    float payload_width = globals.PAYLOAD_WIDTH;
+    float payload_height = globals.PAYLOAD_HEIGHT;
+    float payload_center_x = 0.0f;  // payload中心位置
+    float payload_center_y = 0.0f;
+    
+    // 计算每条边的长度和可容纳的机器人数量
+    float robot_spacing = 2.5f * robot_radius;  // 机器人之间的间距
+    float push_distance = 1.2f * robot_radius;  // 机器人距离payload边的距离
+    
+    // 计算每条边能容纳的最大机器人数量
+    int max_robots_width = std::max(1, (int)floor(payload_width / robot_spacing));
+    int max_robots_height = std::max(1, (int)floor(payload_height / robot_spacing));
+    
+    // 总的可用位置
+    int total_positions = 2 * max_robots_width + 2 * max_robots_height;
+    
+    // 如果机器人数量超过可用位置，调整间距
+    if (globals.NUM_ROBOTS > total_positions) {
+        robot_spacing = std::min(payload_width / (globals.NUM_ROBOTS / 4.0f + 1), 
+                                payload_height / (globals.NUM_ROBOTS / 4.0f + 1));
+        max_robots_width = std::max(1, (int)floor(payload_width / robot_spacing));
+        max_robots_height = std::max(1, (int)floor(payload_height / robot_spacing));
+    }
+    
+    std::vector<std::pair<Eigen::Vector2d, Eigen::Vector2d>> robot_positions_goals;
+    
+    // 分配机器人到各边
+    int robots_assigned = 0;
+    
+    // 边的优先级: 0=上边, 1=右边, 2=下边, 3=左边
+    std::vector<int> robots_per_side(4, 0);
+    
+    // 均匀分配到四边
+    for (int i = 0; i < globals.NUM_ROBOTS; i++) {
+        robots_per_side[i % 4]++;
+    }
+    
+    // 为每条边生成机器人位置
+    for (int side = 0; side < 4; side++) {
+        int robots_on_this_side = robots_per_side[side];
+        
+        for (int i = 0; i < robots_on_this_side; i++) {
+            Eigen::Vector2d start_pos, goal_pos;
+            
+            switch (side) {
 
-        for (int i = 0; i < globals.NUM_ROBOTS; ++i) {
-            Eigen::VectorXd starting(4);
-            starting << positions[i].first, positions[i].second, 0.0, 0.0;
-            Eigen::VectorXd ending(4);
-            ending << destination[i].first, destination[i].second, 0.0, 0.0;
-            std::deque<Eigen::VectorXd> waypoints{starting, ending};
-
-            Color robot_color = ColorFromHSV(i*90., 1., 0.75); 
-            robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
+                case 0: { // 上边 (top edge)
+                    float x_offset = -payload_width/2.0f + (i + 1) * payload_width / (robots_on_this_side + 1);
+                    start_pos = Eigen::Vector2d(payload_center_x + x_offset, 
+                                            payload_center_y + payload_height/2.0f + push_distance);
+                    goal_pos = start_pos; // 目标位置和起始位置相同
+                    break;
+                }
+                case 1: { // 右边 (right edge)
+                    float y_offset = -payload_height/2.0f + (i + 1) * payload_height / (robots_on_this_side + 1);
+                    start_pos = Eigen::Vector2d(payload_center_x + payload_width/2.0f + push_distance, 
+                                            payload_center_y + y_offset);
+                    goal_pos = start_pos; // 目标位置和起始位置相同
+                    break;
+                }
+                case 2: { // 下边 (bottom edge)
+                    float x_offset = payload_width/2.0f - (i + 1) * payload_width / (robots_on_this_side + 1);
+                    start_pos = Eigen::Vector2d(payload_center_x + x_offset, 
+                                            payload_center_y - payload_height/2.0f - push_distance);
+                    goal_pos = start_pos; // 目标位置和起始位置相同
+                    break;
+                }
+                case 3: { // 左边 (left edge)
+                    float y_offset = payload_height/2.0f - (i + 1) * payload_height / (robots_on_this_side + 1);
+                    start_pos = Eigen::Vector2d(payload_center_x - payload_width/2.0f - push_distance, 
+                                            payload_center_y + y_offset);
+                    goal_pos = start_pos; // 目标位置和起始位置相同
+                    break;
+                } 
+            }
+            robot_positions_goals.push_back({start_pos, goal_pos});
+        }
+    }
+    
+    // 创建机器人
+    for (int i = 0; i < globals.NUM_ROBOTS && i < robot_positions_goals.size(); ++i) {
+        Eigen::VectorXd starting(4);
+        starting << robot_positions_goals[i].first.x(), robot_positions_goals[i].first.y(), 0.0, 0.0;
+        
+        Eigen::VectorXd ending(4);
+        ending << robot_positions_goals[i].second.x(), robot_positions_goals[i].second.y(), 0.0, 0.0;
+        
+        std::deque<Eigen::VectorXd> waypoints{starting, ending};
+        
+        // 根据所在边设置不同颜色
+        int side = i % 4;
+        Color robot_color = ColorFromHSV(side * 90.0f, 1.0f, 0.75f);
+        
+        robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
+        
+        // 调试输出
+        std::cout << "Robot " << i << " (Side " << side << "): " 
+                  << "Start(" << starting.x() << "," << starting.y() << ") -> "
+                  << "Goal(" << ending.x() << "," << ending.y() << ")" << std::endl;
         }
 
     }else if (globals.FORMATION=="junction"){
