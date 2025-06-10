@@ -75,6 +75,11 @@ void Payload::update() {
     }
 }
 
+void Payload::setTarget(const Eigen::Vector2d& target) {
+    target_position_ = target;
+    task_completed_ = false; // 重置任务完成状态
+}
+
 void Payload::draw() {
     float x = static_cast<float>(position_.x());
     float y = static_cast<float>(position_.y());

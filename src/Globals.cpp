@@ -49,6 +49,8 @@ void Globals::parse_global_args(std::ifstream& config_file){
     PAYLOAD_HEIGHT = j["PAYLOAD_HEIGHT"];
     PAYLOAD_DENSITY = j["PAYLOAD_DENSITY"];
     PAYLOAD_FRICTION = j["PAYLOAD_FRICTION"];
+    TARGET_X = j["TARGET_X"];
+    TARGET_Y = j["TARGET_Y"];
 
 }
 

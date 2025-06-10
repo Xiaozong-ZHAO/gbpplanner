@@ -135,6 +135,9 @@ void Robot::createPhysicsBody(){
 /* Change the prior of the Current state */
 /***************************************************************************************************/
 
+void updateForPayload(){
+    
+}
 
 void Robot::updateCurrent(){
     // Move plan: move plan current state by plan increment
@@ -179,14 +182,7 @@ void Robot::updateHorizon(){
     Eigen::VectorXd dist_horz_to_goal = waypoints_.front()({0,1}) - horizon->mu_({0,1});                        
     Eigen::VectorXd new_vel = dist_horz_to_goal.normalized() * std::min((double)globals.MAX_SPEED, dist_horz_to_goal.norm());
     Eigen::VectorXd new_pos = horizon->mu_({0,1}) + new_vel*globals.TIMESTEP;
-    // // print the waypoints_.front()({0,1}) value
-    // std::cout << "waypoints_.front()({0,1}): " << waypoints_.front()({0,1}) << std::endl;
-    // // print the hrizon->mu_({0,1}) value
-    // std::cout << "horizon->mu_({0,1}): " << horizon->mu_({0,1}) << std::endl;
-    
-    
-    
-    // Update horizon state with new pos and vel
+
     horizon->mu_ << new_pos, new_vel;
     horizon->change_variable_prior(horizon->mu_);
 

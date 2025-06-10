@@ -58,6 +58,7 @@ public:
     /****************************************/
     //Functions
     /****************************************/
+    void updateForPayload();
     void syncPhysicsToLogical();
     void syncLogicalToPhysics();
     void createPhysicsBody();

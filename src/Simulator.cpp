@@ -42,6 +42,9 @@ Simulator::Simulator(){
 void Simulator::createPayload(Eigen::Vector2d position, float width, float height) {
     auto payload = std::make_shared<Payload>(this, next_payload_id_++, position, width, height, globals.PAYLOAD_DENSITY);
     payloads_[payload->payload_id_] = payload;
+    
+    // set target location
+    payload->setTarget(Eigen::Vector2d(globals.TARGET_X, globals.TARGET_Y));
 }
 
 /*******************************************************************************/
@@ -299,87 +302,124 @@ void Simulator::createOrDeleteRobots(){
     float robot_radius = globals.ROBOT_RADIUS;
     
     // 获取payload信息
+    if (payloads_.empty()) return; // 如果没有payload，直接返回
+    
+    auto payload = payloads_.begin()->second; // 获取第一个payload
+    Eigen::Vector2d payload_pos = payload->getPosition();
+    Eigen::Vector2d target_pos = payload->target_position_;
+    
+    // 计算payload到目标的方向向量
+    Eigen::Vector2d direction = target_pos - payload_pos;
+    if (direction.norm() < 0.01) {
+        // 如果已经到达目标，不创建机器人
+        return;
+    }
+    
+    // 归一化方向向量
+    direction.normalize();
+    
+    // 获取payload尺寸
     float payload_width = globals.PAYLOAD_WIDTH;
     float payload_height = globals.PAYLOAD_HEIGHT;
-    float payload_center_x = 0.0f;  // payload中心位置
-    float payload_center_y = 0.0f;
+    float robot_spacing = 2.5f * robot_radius;
+    float push_distance = 1.2f * robot_radius;
     
-    // 计算每条边的长度和可容纳的机器人数量
-    float robot_spacing = 2.5f * robot_radius;  // 机器人之间的间距
-    float push_distance = 1.2f * robot_radius;  // 机器人距离payload边的距离
-    
-    // 计算每条边能容纳的最大机器人数量
-    int max_robots_width = std::max(1, (int)floor(payload_width / robot_spacing));
-    int max_robots_height = std::max(1, (int)floor(payload_height / robot_spacing));
-    
-    // 总的可用位置
-    int total_positions = 2 * max_robots_width + 2 * max_robots_height;
-    
-    // 如果机器人数量超过可用位置，调整间距
-    if (globals.NUM_ROBOTS > total_positions) {
-        robot_spacing = std::min(payload_width / (globals.NUM_ROBOTS / 4.0f + 1), 
-                                payload_height / (globals.NUM_ROBOTS / 4.0f + 1));
-        max_robots_width = std::max(1, (int)floor(payload_width / robot_spacing));
-        max_robots_height = std::max(1, (int)floor(payload_height / robot_spacing));
-    }
+    // 计算水平和垂直分量的绝对值
+    float horizontal_component = std::abs(direction.x());
+    float vertical_component = std::abs(direction.y());
     
     std::vector<std::pair<Eigen::Vector2d, Eigen::Vector2d>> robot_positions_goals;
     
-    // 分配机器人到各边
+    // 确定需要推力的边
+    bool need_horizontal_push = horizontal_component > 0.1; // 需要水平方向推力
+    bool need_vertical_push = vertical_component > 0.1;     // 需要垂直方向推力
+    
     int robots_assigned = 0;
     
-    // 边的优先级: 0=上边, 1=右边, 2=下边, 3=左边
-    std::vector<int> robots_per_side(4, 0);
-    
-    // 均匀分配到四边
-    for (int i = 0; i < globals.NUM_ROBOTS; i++) {
-        robots_per_side[i % 4]++;
-    }
-    
-    // 为每条边生成机器人位置
-    for (int side = 0; side < 4; side++) {
-        int robots_on_this_side = robots_per_side[side];
+    if (need_horizontal_push && need_vertical_push) {
+        // 需要两个方向的推力，按比例分配机器人
+        int horizontal_robots = (int)std::round(globals.NUM_ROBOTS * horizontal_component / (horizontal_component + vertical_component));
+        int vertical_robots = globals.NUM_ROBOTS - horizontal_robots;
         
-        for (int i = 0; i < robots_on_this_side; i++) {
+        // 确定推力方向（根据目标在payload的哪一边）
+        int horizontal_side = (direction.x() > 0) ? 3 : 1; // 目标在右边推左边(3)，目标在左边推右边(1)
+        int vertical_side = (direction.y() > 0) ? 2 : 0;   // 目标在上边推下边(2)，目标在下边推上边(0)
+        
+        // 放置水平推力机器人
+        for (int i = 0; i < horizontal_robots; i++) {
             Eigen::Vector2d start_pos, goal_pos;
             
-            switch (side) {
-
-                case 0: { // 上边 (top edge)
-                    float x_offset = -payload_width/2.0f + (i + 1) * payload_width / (robots_on_this_side + 1);
-                    start_pos = Eigen::Vector2d(payload_center_x + x_offset, 
-                                            payload_center_y + payload_height/2.0f + push_distance);
-                    goal_pos = start_pos; // 目标位置和起始位置相同
-                    break;
-                }
-                case 1: { // 右边 (right edge)
-                    float y_offset = -payload_height/2.0f + (i + 1) * payload_height / (robots_on_this_side + 1);
-                    start_pos = Eigen::Vector2d(payload_center_x + payload_width/2.0f + push_distance, 
-                                            payload_center_y + y_offset);
-                    goal_pos = start_pos; // 目标位置和起始位置相同
-                    break;
-                }
-                case 2: { // 下边 (bottom edge)
-                    float x_offset = payload_width/2.0f - (i + 1) * payload_width / (robots_on_this_side + 1);
-                    start_pos = Eigen::Vector2d(payload_center_x + x_offset, 
-                                            payload_center_y - payload_height/2.0f - push_distance);
-                    goal_pos = start_pos; // 目标位置和起始位置相同
-                    break;
-                }
-                case 3: { // 左边 (left edge)
-                    float y_offset = payload_height/2.0f - (i + 1) * payload_height / (robots_on_this_side + 1);
-                    start_pos = Eigen::Vector2d(payload_center_x - payload_width/2.0f - push_distance, 
-                                            payload_center_y + y_offset);
-                    goal_pos = start_pos; // 目标位置和起始位置相同
-                    break;
-                } 
+            if (horizontal_side == 1) { // 右边
+                float y_offset = -payload_height/2.0f + (i + 1) * payload_height / (horizontal_robots + 1);
+                start_pos = Eigen::Vector2d(payload_pos.x() + payload_width/2.0f + push_distance, 
+                                          payload_pos.y() + y_offset);
+            } else { // 左边
+                float y_offset = -payload_height/2.0f + (i + 1) * payload_height / (horizontal_robots + 1);
+                start_pos = Eigen::Vector2d(payload_pos.x() - payload_width/2.0f - push_distance, 
+                                          payload_pos.y() + y_offset);
             }
+            goal_pos = start_pos;
+            robot_positions_goals.push_back({start_pos, goal_pos});
+        }
+        
+        // 放置垂直推力机器人
+        for (int i = 0; i < vertical_robots; i++) {
+            Eigen::Vector2d start_pos, goal_pos;
+            
+            if (vertical_side == 0) { // 上边
+                float x_offset = -payload_width/2.0f + (i + 1) * payload_width / (vertical_robots + 1);
+                start_pos = Eigen::Vector2d(payload_pos.x() + x_offset, 
+                                          payload_pos.y() + payload_height/2.0f + push_distance);
+            } else { // 下边
+                float x_offset = -payload_width/2.0f + (i + 1) * payload_width / (vertical_robots + 1);
+                start_pos = Eigen::Vector2d(payload_pos.x() + x_offset, 
+                                          payload_pos.y() - payload_height/2.0f - push_distance);
+            }
+            goal_pos = start_pos;
+            robot_positions_goals.push_back({start_pos, goal_pos});
+        }
+        
+    } else if (need_horizontal_push) {
+        // 只需要水平推力
+        int side = (direction.x() > 0) ? 3 : 1; // 左边或右边
+        
+        for (int i = 0; i < globals.NUM_ROBOTS; i++) {
+            Eigen::Vector2d start_pos, goal_pos;
+            float y_offset = -payload_height/2.0f + (i + 1) * payload_height / (globals.NUM_ROBOTS + 1);
+            
+            if (side == 1) { // 右边推
+                start_pos = Eigen::Vector2d(payload_pos.x() + payload_width/2.0f + push_distance, 
+                                          payload_pos.y() + y_offset);
+            } else { // 左边推
+                start_pos = Eigen::Vector2d(payload_pos.x() - payload_width/2.0f - push_distance, 
+                                          payload_pos.y() + y_offset);
+            }
+            goal_pos = start_pos;
+            robot_positions_goals.push_back({start_pos, goal_pos});
+        }
+        
+    } else if (need_vertical_push) {
+        // 只需要垂直推力
+        int side = (direction.y() > 0) ? 2 : 0; // 下边或上边
+        
+        for (int i = 0; i < globals.NUM_ROBOTS; i++) {
+            Eigen::Vector2d start_pos, goal_pos;
+            float x_offset = -payload_width/2.0f + (i + 1) * payload_width / (globals.NUM_ROBOTS + 1);
+            
+            if (side == 0) { // 上边推
+                start_pos = Eigen::Vector2d(payload_pos.x() + x_offset, 
+                                          payload_pos.y() + payload_height/2.0f + push_distance);
+            } else { // 下边推
+                start_pos = Eigen::Vector2d(payload_pos.x() + x_offset, 
+                                          payload_pos.y() - payload_height/2.0f - push_distance);
+            }
+            goal_pos = start_pos;
             robot_positions_goals.push_back({start_pos, goal_pos});
         }
     }
     
     // 创建机器人
-    for (int i = 0; i < globals.NUM_ROBOTS && i < robot_positions_goals.size(); ++i) {
+    for (int i = 0; i < robot_positions_goals.size(); ++i) {
         Eigen::VectorXd starting(4);
         starting << robot_positions_goals[i].first.x(), robot_positions_goals[i].first.y(), 0.0, 0.0;
         
@@ -388,17 +428,25 @@ void Simulator::createOrDeleteRobots(){
         
         std::deque<Eigen::VectorXd> waypoints{starting, ending};
         
-        // 根据所在边设置不同颜色
-        int side = i % 4;
-        Color robot_color = ColorFromHSV(side * 90.0f, 1.0f, 0.75f);
+        // 根据推力方向设置颜色
+        Color robot_color;
+        if (need_horizontal_push && need_vertical_push) {
+            robot_color = (i < globals.NUM_ROBOTS * horizontal_component / (horizontal_component + vertical_component)) ? 
+                         ColorFromHSV(0.0f, 1.0f, 0.75f) :    // 红色 - 水平推力
+                         ColorFromHSV(240.0f, 1.0f, 0.75f);   // 蓝色 - 垂直推力
+        } else if (need_horizontal_push) {
+            robot_color = ColorFromHSV(0.0f, 1.0f, 0.75f);     // 红色 - 水平推力
+        } else {
+            robot_color = ColorFromHSV(240.0f, 1.0f, 0.75f);   // 蓝色 - 垂直推力
+        }
         
         robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
         
         // 调试输出
-        std::cout << "Robot " << i << " (Side " << side << "): " 
+        std::cout << "Robot " << i << " (Push direction): " 
                   << "Start(" << starting.x() << "," << starting.y() << ") -> "
                   << "Goal(" << ending.x() << "," << ending.y() << ")" << std::endl;
-        }
+    }
 
     }else if (globals.FORMATION=="junction"){
     // Robots in a cross-roads style junction. There is only one-way traffic, and no turning.        

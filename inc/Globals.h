@@ -64,6 +64,8 @@ class Globals {
     float PAYLOAD_HEIGHT;
     float PAYLOAD_DENSITY;
     float PAYLOAD_FRICTION;
+    float TARGET_X;
+    float TARGET_Y;
     
     Globals();
     int parse_global_args(DArgs::DArgs& dargs);
