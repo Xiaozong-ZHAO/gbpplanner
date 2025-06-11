@@ -39,6 +39,8 @@ Simulator::Simulator(){
     }
 };
 
+
+
 void Simulator::createPayload(Eigen::Vector2d position, float width, float height) {
     auto payload = std::make_shared<Payload>(this, next_payload_id_++, position, width, height, globals.PAYLOAD_DENSITY);
     payloads_[payload->payload_id_] = payload;
@@ -84,6 +86,32 @@ void Simulator::draw(){
             for (auto [pid, payload]: payloads_) {
                 payload->draw();
             }
+
+
+            // Draw Contact points and Normals
+            for (auto [rid, robot] : robots_) {
+                for (auto [pid, payload] : payloads_) {
+                    if (isRobotContactingPayload(rid, pid))
+                    {
+                        auto [contactPoint, contactNormal] = getContactPoint(rid, pid);
+                        if (contactPoint == Eigen::Vector2d::Zero()) continue; // No contact point found
+                        Vector3 contactPose3D = {
+                            (float) contactPoint.x(),
+                            1.5f,
+                            (float) contactPoint.y()
+                        };
+                        DrawSphere(contactPose3D, 0.5f, RED);
+
+                        Vector3 normalStart = contactPose3D;
+                        Vector3 normalEnd = {
+                            (float) (contactPoint.x() + contactNormal.x()),
+                            1.5f,
+                            (float) (contactPoint.y() + contactNormal.y())
+                        };
+                        DrawLine3D(normalStart, normalEnd, BLUE);
+                    }
+                }
+            }
         EndMode3D();
         draw_info(clock_);
     EndDrawing();    
@@ -110,6 +138,64 @@ void Simulator::moveRobot(){
     if (clock_ >= globals.MAX_TIME ) globals.RUN = false;
 }
 
+bool Simulator::isRobotContactingPayload(int robot_id, int payload_id) {
+    // 获取机器人和payload的物理体
+    auto robot_it = robots_.find(robot_id);
+    auto payload_it = payloads_.find(payload_id);
+    
+    if (robot_it == robots_.end() || payload_it == payloads_.end()) {
+        return false; // 机器人或payload不存在
+    }
+    
+    b2Body* robot_body = robot_it->second->physicsBody_;
+    b2Body* payload_body = payload_it->second->physicsBody_;
+    
+    if (!robot_body || !payload_body) {
+        return false; // 物理体不存在
+    }
+    
+    // 遍历机器人的所有接触
+    for (b2ContactEdge* edge = robot_body->GetContactList(); edge; edge = edge->next) {
+        if (edge->other == payload_body && edge->contact->IsTouching()) {
+            return true; // 找到接触
+        }
+    }
+    
+    return false; // 没有接触
+}
+
+std::pair<Eigen::Vector2d, Eigen::Vector2d> Simulator::getContactPoint(int robot_id, int payload_id){
+    auto robot_it = robots_.find(robot_id);
+    auto payload_it = payloads_.find(payload_id);
+
+    b2Body* robot_body = robot_it->second->physicsBody_;
+    b2Body* payload_body = payload_it->second->physicsBody_;
+
+    for (b2ContactEdge *edge = robot_body->GetContactList(); edge; edge=edge->next){
+        b2WorldManifold worldManifold;
+        edge->contact->GetWorldManifold(&worldManifold);
+
+        b2Vec2 contactPoint = worldManifold.points[0];
+        Eigen::Vector2d point(contactPoint.x, contactPoint.y);
+        b2Vec2 normal = worldManifold.normal;
+        if (edge->contact->GetFixtureA()->GetBody() == robot_body) {
+            return {point, Eigen::Vector2d(normal.x, normal.y)};
+        } else{
+            return {point, Eigen::Vector2d(-normal.x, -normal.y)};
+        }
+    }
+    return {Eigen::Vector2d::Zero(), Eigen::Vector2d::Zero()};
+}
+
+void Simulator::computeLeastSquares(){
+    // first compute desired payload velocity
+    // which is related to the current payload position and the target payload position
+
+    
+
+
+}
+
 void Simulator::timestep(){
 
     if (globals.SIM_MODE!=Timestep) return;
@@ -118,11 +204,12 @@ void Simulator::timestep(){
     calculateRobotNeighbours(robots_);
     for (auto [r_id, robot] : robots_) {
         robot->updateInterrobotFactors();
-        std::cout << "Robot " << robot->rid_ << " physical position: " << std::endl;
-        std::cout << robot->position_.transpose() << std::endl;
 
-        std::cout << "Robot " << robot->rid_ << " factor position: " << std::endl;
-        std::cout << robot->getVar(0)->mu_.transpose() << std::endl;
+        // std::cout << "Robot " << robot->rid_ << " physical position: " << std::endl;
+        // std::cout << robot->position_.transpose() << std::endl;
+
+        // std::cout << "Robot " << robot->rid_ << " factor position: " << std::endl;
+        // std::cout << robot->getVar(0)->mu_.transpose() << std::endl;
     }
 
     // If the communications failure rate is non-zero, activate/deactivate robot comms
@@ -264,6 +351,8 @@ void Simulator::createSingleRobot(){
 // New formations must modify the vectors "robots to create" and optionally "robots_to_delete"
 // by appending (push_back()) a shared pointer to a Robot class.
 /*******************************************************************************/
+
+
 void Simulator::createOrDeleteRobots(){
     if (!new_robots_needed_) return;
 
@@ -346,38 +435,47 @@ void Simulator::createOrDeleteRobots(){
         int vertical_side = (direction.y() > 0) ? 2 : 0;   // 目标在上边推下边(2)，目标在下边推上边(0)
         
         // 放置水平推力机器人
-        for (int i = 0; i < horizontal_robots; i++) {
-            Eigen::Vector2d start_pos, goal_pos;
-            
-            if (horizontal_side == 1) { // 右边
-                float y_offset = -payload_height/2.0f + (i + 1) * payload_height / (horizontal_robots + 1);
-                start_pos = Eigen::Vector2d(payload_pos.x() + payload_width/2.0f + push_distance, 
-                                          payload_pos.y() + y_offset);
-            } else { // 左边
-                float y_offset = -payload_height/2.0f + (i + 1) * payload_height / (horizontal_robots + 1);
-                start_pos = Eigen::Vector2d(payload_pos.x() - payload_width/2.0f - push_distance, 
-                                          payload_pos.y() + y_offset);
-            }
-            goal_pos = start_pos;
-            robot_positions_goals.push_back({start_pos, goal_pos});
-        }
-        
-        // 放置垂直推力机器人
-        for (int i = 0; i < vertical_robots; i++) {
-            Eigen::Vector2d start_pos, goal_pos;
-            
-            if (vertical_side == 0) { // 上边
-                float x_offset = -payload_width/2.0f + (i + 1) * payload_width / (vertical_robots + 1);
-                start_pos = Eigen::Vector2d(payload_pos.x() + x_offset, 
-                                          payload_pos.y() + payload_height/2.0f + push_distance);
-            } else { // 下边
-                float x_offset = -payload_width/2.0f + (i + 1) * payload_width / (vertical_robots + 1);
-                start_pos = Eigen::Vector2d(payload_pos.x() + x_offset, 
-                                          payload_pos.y() - payload_height/2.0f - push_distance);
-            }
-            goal_pos = start_pos;
-            robot_positions_goals.push_back({start_pos, goal_pos});
-        }
+        // 放置水平推力机器人
+for (int i = 0; i < horizontal_robots; i++) {
+    Eigen::Vector2d start_pos, goal_pos;
+    float push_offset = 10.0f; // 推力位移量，可以调整
+    
+    if (horizontal_side == 1) { // 右边
+        float y_offset = -payload_height/2.0f + (i + 1) * payload_height / (horizontal_robots + 1);
+        start_pos = Eigen::Vector2d(payload_pos.x() + payload_width/2.0f + push_distance,
+                                  payload_pos.y() + y_offset);
+        // goal_pos向左移动（朝payload方向推）
+        goal_pos = Eigen::Vector2d(start_pos.x() - push_offset, start_pos.y());
+    } else { // 左边
+        float y_offset = -payload_height/2.0f + (i + 1) * payload_height / (horizontal_robots + 1);
+        start_pos = Eigen::Vector2d(payload_pos.x() - payload_width/2.0f - push_distance,
+                                  payload_pos.y() + y_offset);
+        // goal_pos向右移动（朝payload方向推）
+        goal_pos = Eigen::Vector2d(start_pos.x() + push_offset, start_pos.y());
+    }
+    robot_positions_goals.push_back({start_pos, goal_pos});
+}
+
+// 放置垂直推力机器人
+for (int i = 0; i < vertical_robots; i++) {
+    Eigen::Vector2d start_pos, goal_pos;
+    float push_offset = 10.0f; // 推力位移量，可以调整
+    
+    if (vertical_side == 0) { // 上边
+        float x_offset = -payload_width/2.0f + (i + 1) * payload_width / (vertical_robots + 1);
+        start_pos = Eigen::Vector2d(payload_pos.x() + x_offset,
+                                  payload_pos.y() + payload_height/2.0f + push_distance);
+        // goal_pos向下移动（朝payload方向推）
+        goal_pos = Eigen::Vector2d(start_pos.x(), start_pos.y() - push_offset);
+    } else { // 下边
+        float x_offset = -payload_width/2.0f + (i + 1) * payload_width / (vertical_robots + 1);
+        start_pos = Eigen::Vector2d(payload_pos.x() + x_offset,
+                                  payload_pos.y() - payload_height/2.0f - push_distance);
+        // goal_pos向上移动（朝payload方向推）
+        goal_pos = Eigen::Vector2d(start_pos.x(), start_pos.y() + push_offset);
+    }
+    robot_positions_goals.push_back({start_pos, goal_pos});
+}
         
     } else if (need_horizontal_push) {
         // 只需要水平推力

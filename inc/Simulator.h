@@ -62,9 +62,10 @@ public:
     bool new_robots_needed_ = true;                 // Whether or not to create new robots. (Some formations are dynamicaly changing)
     bool symmetric_factors = false;                 // If true, when inter-robot factors need to be created between two robots,
                                                     // a pair of factors is created (one belonging to each robot). This becomes a redundancy.
-
+    std::pair<Eigen::Vector2d, Eigen::Vector2d> getContactPoint(int robot_id, int payload_id);
+    bool isRobotContactingPayload(int robot_id, int payload_id);
     b2World* physicsWorld_ = nullptr;
-    
+    void computeLeastSquares();
 
 
     b2World* getPhysicsWorld(){
@@ -81,7 +82,7 @@ public:
     /*******************************************************************************/    
     void createSingleRobot();
     void createOrDeleteRobots();
-
+    void isRobotContactngPayload(int robot_id, int payload_id);
     void createPayload(Eigen::Vector2d position, float width, float height);
     void deletePayload(int payload_id);
     std::shared_ptr<Payload> getPayload(int payload_id);
