@@ -47,6 +47,7 @@ class Payload {
     
     // Create the physical entity
     void createPhysicsBody(float density);
+    std::pair<std::vector<Eigen::Vector2d>, std::vector<Eigen::Vector2d>> getContactPointsAndNormals() const;
 
     void setTarget(const Eigen::Vector2d& target);
     bool isAtTarget() const;

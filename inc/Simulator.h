@@ -85,6 +85,9 @@ public:
     void isRobotContactngPayload(int robot_id, int payload_id);
     void createPayload(Eigen::Vector2d position, float width, float height);
     void deletePayload(int payload_id);
+    std::vector<Eigen::Vector2d> getFixedContactPoints(std::shared_ptr<Payload> payload);
+    std::vector<Eigen::Vector2d> getFixedContactNormals(std::shared_ptr<Payload> payload);
+    Eigen::VectorXd solveConstrainedLeastSquares(const Eigen::MatrixXd &G, const Eigen::Vector3d& w_cmd);
     std::shared_ptr<Payload> getPayload(int payload_id);
 
     /*******************************************************************************/

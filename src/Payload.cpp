@@ -147,3 +147,60 @@ Eigen::Vector2d Payload::getVelocity() const {
     return Eigen::Vector2d::Zero();
 }
 
+std::pair<std::vector<Eigen::Vector2d>, std::vector<Eigen::Vector2d>> Payload::getContactPointsAndNormals() const {
+    std::vector<Eigen::Vector2d> points;
+    std::vector<Eigen::Vector2d> normals;
+    
+    if (!physicsBody_) return {points, normals};
+    
+    // 获取Box2D的形状信息
+    b2Fixture* fixture = physicsBody_->GetFixtureList();
+    b2PolygonShape* shape = (b2PolygonShape*)fixture->GetShape();
+    b2Transform transform = physicsBody_->GetTransform();
+    
+    // 获取所有世界坐标的顶点
+    std::vector<Eigen::Vector2d> vertices;
+    for (int i = 0; i < shape->m_count; i++) {
+        b2Vec2 worldVertex = b2Mul(transform, shape->m_vertices[i]);
+        vertices.push_back(Eigen::Vector2d(worldVertex.x, worldVertex.y));
+    }
+    
+    // 假设vertices按逆时针顺序：[0]左下, [1]右下, [2]右上, [3]左上
+    Eigen::Vector2d center = position_; // payload中心
+    
+    // 上边：从vertices[3]到vertices[2]
+    Eigen::Vector2d topEdgeDir = vertices[2] - vertices[3];
+    Eigen::Vector2d topNormal(-topEdgeDir.y(), topEdgeDir.x()); // 垂直向量
+    topNormal.normalize();
+    
+    // 确保法向量指向payload内部
+    Eigen::Vector2d topMidpoint = 0.5 * (vertices[2] + vertices[3]);
+    if ((center - topMidpoint).dot(topNormal) < 0) {
+        topNormal = -topNormal;
+    }
+    
+    // 添加上边的两个接触点和法向量
+    points.push_back(vertices[3] + 0.25 * topEdgeDir);
+    points.push_back(vertices[3] + 0.75 * topEdgeDir);
+    normals.push_back(topNormal);
+    normals.push_back(topNormal);
+    
+    // 左边：从vertices[3]到vertices[0]
+    Eigen::Vector2d leftEdgeDir = vertices[0] - vertices[3];
+    Eigen::Vector2d leftNormal(-leftEdgeDir.y(), leftEdgeDir.x()); // 垂直向量
+    leftNormal.normalize();
+    
+    // 确保法向量指向payload内部
+    Eigen::Vector2d leftMidpoint = 0.5 * (vertices[0] + vertices[3]);
+    if ((center - leftMidpoint).dot(leftNormal) < 0) {
+        leftNormal = -leftNormal;
+    }
+    
+    // 添加左边的两个接触点和法向量
+    points.push_back(vertices[3] + 0.25 * leftEdgeDir);
+    points.push_back(vertices[3] + 0.75 * leftEdgeDir);
+    normals.push_back(leftNormal);
+    normals.push_back(leftNormal);
+    
+    return {points, normals};
+}

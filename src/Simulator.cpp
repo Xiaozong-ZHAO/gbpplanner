@@ -88,14 +88,14 @@ void Simulator::draw(){
                 payload->draw();
             }
             
-            // Draw Contact points and Cross Product vectors
+            // Draw Contact points and normals (old method - real robot-payload contacts)
             for (auto [rid, robot] : robots_) {
                 for (auto [pid, payload] : payloads_) {
                     if (isRobotContactingPayload(rid, pid)) {
                         auto [contactPoint, contactNormal] = getContactPoint(rid, pid);
                         if (contactPoint == Eigen::Vector2d::Zero()) continue;
                         
-                        // 绘制接触点
+                        // 绘制真实接触点
                         Vector3 contactPose3D = {
                             (float) contactPoint.x(),
                             1.5f,
@@ -103,53 +103,37 @@ void Simulator::draw(){
                         };
                         DrawSphere(contactPose3D, 0.5f, RED);
                         
-                        // 获取payload中心
-                        Eigen::Vector2d payload_center = payload->getPosition();
-                        
-                        // 计算从中心到接触点的向量
-                        Eigen::Vector2d r = contactPoint - payload_center;
-                        
-                        // 计算叉积 r × n (只有z分量)
-                        double cross_product_z = r.x() * contactNormal.y() - r.y() * contactNormal.x();
-                        
-                        // 绘制payload中心到接触点的连线
-                        Vector3 centerPos3D = {
-                            (float) payload_center.x(),
-                            1.5f,
-                            (float) payload_center.y()
-                        };
-                        DrawLine3D(centerPos3D, contactPose3D, GREEN);
-                        
-                        // 绘制接触法向量
+                        // 绘制真实接触法向量
                         Vector3 normalEnd = {
                             (float) (contactPoint.x() + contactNormal.x()),
                             1.5f,
                             (float) (contactPoint.y() + contactNormal.y())
                         };
                         DrawLine3D(contactPose3D, normalEnd, BLUE);
-                        
-                        // 绘制叉积方向（垂直向上或向下的箭头）
-                        Vector3 crossProductEnd = {
-                            (float) contactPoint.x(),
-                            1.5f + (float)(cross_product_z * 2.0), // 放大显示
-                            (float) contactPoint.y()
-                        };
-                        
-                        // 根据叉积方向选择颜色
-                        Color crossColor = (cross_product_z > 0) ? PURPLE : ORANGE;
-                        DrawLine3D(contactPose3D, crossProductEnd, crossColor);
-                        
-                        // 在叉积终点绘制小球表示方向
-                        DrawSphere(crossProductEnd, 0.3f, crossColor);
-                        
-                        // 可选：显示数值信息
-                        std::cout << "Robot " << rid << " - Payload " << pid << ":" << std::endl;
-                        std::cout << "  Contact point: (" << contactPoint.x() << ", " << contactPoint.y() << ")" << std::endl;
-                        std::cout << "  Payload center: (" << payload_center.x() << ", " << payload_center.y() << ")" << std::endl;
-                        std::cout << "  r vector: (" << r.x() << ", " << r.y() << ")" << std::endl;
-                        std::cout << "  Normal: (" << contactNormal.x() << ", " << contactNormal.y() << ")" << std::endl;
-                        std::cout << "  Cross product (torque): " << cross_product_z << std::endl;
                     }
+                }
+            }
+            
+            // Draw fixed contact points and normals from Payload::getContactPointsAndNormals()
+            for (auto [pid, payload] : payloads_) {
+                auto [fixedContactPoints, fixedContactNormals] = payload->getContactPointsAndNormals();
+                
+                for (size_t i = 0; i < fixedContactPoints.size(); i++) {
+                    // 绘制固定接触点
+                    Vector3 fixedPointPos3D = {
+                        (float) fixedContactPoints[i].x(),
+                        1.8f, // 稍微高一点以区分
+                        (float) fixedContactPoints[i].y()
+                    };
+                    DrawSphere(fixedPointPos3D, 0.4f, YELLOW); // 用黄色区分
+                    
+                    // 绘制固定接触点的法向量
+                    Vector3 fixedNormalEnd = {
+                        (float) (fixedContactPoints[i].x() + fixedContactNormals[i].x()),
+                        1.8f,
+                        (float) (fixedContactPoints[i].y() + fixedContactNormals[i].y())
+                    };
+                    DrawLine3D(fixedPointPos3D, fixedNormalEnd, GREEN); // 用绿色表示固定法向量
                 }
             }
             
@@ -228,6 +212,29 @@ std::pair<Eigen::Vector2d, Eigen::Vector2d> Simulator::getContactPoint(int robot
     return {Eigen::Vector2d::Zero(), Eigen::Vector2d::Zero()};
 }
 
+Eigen::VectorXd Simulator::solveConstrainedLeastSquares(const Eigen::MatrixXd &G, const Eigen::Vector3d& w_cmd) {
+    // 检查是否有接触的机器人
+    if (G.cols() == 0) {
+        return Eigen::VectorXd::Zero(0);
+    }
+    
+    // 使用SVD求解（最稳定）
+    Eigen::VectorXd f = G.bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(w_cmd);
+    
+    // 简单处理非负约束
+    for (int i = 0; i < f.size(); i++) {
+        f(i) = std::max(0.0, f(i));
+    }
+    
+    // 调试输出
+    std::cout << "G matrix (3x" << G.cols() << "):\n" << G << std::endl;
+    std::cout << "w_cmd: " << w_cmd.transpose() << std::endl;
+    std::cout << "Solved f: " << f.transpose() << std::endl;
+    std::cout << "Residual: " << (G * f - w_cmd).norm() << std::endl;
+    
+    return f;
+}
+
 void Simulator::computeLeastSquares(){
     // first compute desired payload velocity
     // which is related to the current payload position and the target payload position
@@ -253,10 +260,38 @@ void Simulator::computeLeastSquares(){
 
         Eigen::Vector2d required_force = (mass * (desired_velocity - current_velocity)) / dt;
         double required_torque = (inertia * (desired_angular_velocity - current_angular_velocity)) / dt;
+        
+        std::vector<Eigen::Vector2d> contact_points;
+        std::vector<Eigen::Vector2d> contact_normals;
+        for (auto& [rid, robot]: robots_) {
+            auto [point, normal] = getContactPoint(rid, pid);
+            contact_points.push_back(point);
+            contact_normals.push_back(normal);
+        }
+        Eigen::MatrixXd G(3, globals.NUM_ROBOTS);
+        Eigen::Vector2d payload_center = payload->getPosition();
+        for (int i = 0; i < globals.NUM_ROBOTS; i++){
+            G(0, i) = contact_normals[i].x();
+            G(1, i) = contact_normals[i].y();
+
+            Eigen::Vector2d r = contact_points[i] - payload_center; // 从中心到接触点的向量
+            double torque_contribution = r.x() * contact_normals[i].y() - r.y() * contact_normals[i].x(); // 叉积的z分量
+            G(2, i) = torque_contribution;
+        }
+
+        
+        Eigen::Vector3d w_cmd;
+        w_cmd << required_force.x(), required_force.y(), required_torque;
+        
+        // 4. 求解最小二乘问题: min ||f||² s.t. G*f = w_cmd, f >= 0
+        Eigen::VectorXd f = solveConstrainedLeastSquares(G, w_cmd);
+
 
 
     }
 }
+
+
 
 void Simulator::timestep(){
 
