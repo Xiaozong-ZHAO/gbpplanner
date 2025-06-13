@@ -73,48 +73,89 @@ Simulator::~Simulator(){
 /*******************************************************************************/
 void Simulator::draw(){
     if (!globals.DISPLAY) return;
-
+    
     BeginDrawing();
         ClearBackground(RAYWHITE);
         BeginMode3D(graphics->camera3d);
             // Draw Ground
             DrawModel(graphics->groundModel_, graphics->groundModelpos_, 1., WHITE);
+            
             // Draw Robots
             for (auto [rid, robot] : robots_) robot->draw();
-
+            
             // Draw Payloads
             for (auto [pid, payload]: payloads_) {
                 payload->draw();
             }
-
-
-            // Draw Contact points and Normals
+            
+            // Draw Contact points and Cross Product vectors
             for (auto [rid, robot] : robots_) {
                 for (auto [pid, payload] : payloads_) {
-                    if (isRobotContactingPayload(rid, pid))
-                    {
+                    if (isRobotContactingPayload(rid, pid)) {
                         auto [contactPoint, contactNormal] = getContactPoint(rid, pid);
-                        if (contactPoint == Eigen::Vector2d::Zero()) continue; // No contact point found
+                        if (contactPoint == Eigen::Vector2d::Zero()) continue;
+                        
+                        // 绘制接触点
                         Vector3 contactPose3D = {
                             (float) contactPoint.x(),
                             1.5f,
                             (float) contactPoint.y()
                         };
                         DrawSphere(contactPose3D, 0.5f, RED);
-
-                        Vector3 normalStart = contactPose3D;
+                        
+                        // 获取payload中心
+                        Eigen::Vector2d payload_center = payload->getPosition();
+                        
+                        // 计算从中心到接触点的向量
+                        Eigen::Vector2d r = contactPoint - payload_center;
+                        
+                        // 计算叉积 r × n (只有z分量)
+                        double cross_product_z = r.x() * contactNormal.y() - r.y() * contactNormal.x();
+                        
+                        // 绘制payload中心到接触点的连线
+                        Vector3 centerPos3D = {
+                            (float) payload_center.x(),
+                            1.5f,
+                            (float) payload_center.y()
+                        };
+                        DrawLine3D(centerPos3D, contactPose3D, GREEN);
+                        
+                        // 绘制接触法向量
                         Vector3 normalEnd = {
                             (float) (contactPoint.x() + contactNormal.x()),
                             1.5f,
                             (float) (contactPoint.y() + contactNormal.y())
                         };
-                        DrawLine3D(normalStart, normalEnd, BLUE);
+                        DrawLine3D(contactPose3D, normalEnd, BLUE);
+                        
+                        // 绘制叉积方向（垂直向上或向下的箭头）
+                        Vector3 crossProductEnd = {
+                            (float) contactPoint.x(),
+                            1.5f + (float)(cross_product_z * 2.0), // 放大显示
+                            (float) contactPoint.y()
+                        };
+                        
+                        // 根据叉积方向选择颜色
+                        Color crossColor = (cross_product_z > 0) ? PURPLE : ORANGE;
+                        DrawLine3D(contactPose3D, crossProductEnd, crossColor);
+                        
+                        // 在叉积终点绘制小球表示方向
+                        DrawSphere(crossProductEnd, 0.3f, crossColor);
+                        
+                        // 可选：显示数值信息
+                        std::cout << "Robot " << rid << " - Payload " << pid << ":" << std::endl;
+                        std::cout << "  Contact point: (" << contactPoint.x() << ", " << contactPoint.y() << ")" << std::endl;
+                        std::cout << "  Payload center: (" << payload_center.x() << ", " << payload_center.y() << ")" << std::endl;
+                        std::cout << "  r vector: (" << r.x() << ", " << r.y() << ")" << std::endl;
+                        std::cout << "  Normal: (" << contactNormal.x() << ", " << contactNormal.y() << ")" << std::endl;
+                        std::cout << "  Cross product (torque): " << cross_product_z << std::endl;
                     }
                 }
             }
+            
         EndMode3D();
         draw_info(clock_);
-    EndDrawing();    
+    EndDrawing();
 };
 
 /*******************************************************************************/
@@ -190,10 +231,31 @@ std::pair<Eigen::Vector2d, Eigen::Vector2d> Simulator::getContactPoint(int robot
 void Simulator::computeLeastSquares(){
     // first compute desired payload velocity
     // which is related to the current payload position and the target payload position
+    for (auto& [pid, payload]: payloads_){
+        Eigen::Vector2d dist_to_target = payload->target_position_ - payload->position_;
+        Eigen::Vector2d desired_velocity = dist_to_target.normalized() * std::min(static_cast<double>(globals.MAX_SPEED), dist_to_target.norm());
 
-    
+        Eigen::Quaterniond relative_rotation = payload->target_orientation_ * payload->current_orientation_.inverse();
+
+        double rotation_error = 2.0 * std::acos(relative_rotation.w());
+        double rotation_direction = (relative_rotation.z() >=0 )? 1.0: -1.0;
+        double signed_rotation_error = rotation_direction * rotation_error;
+
+        double desired_angular_velocity = std::copysign(1.0, signed_rotation_error) * 
+            std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED), std::abs(signed_rotation_error));
+        
+        Eigen::Vector2d current_velocity = payload->getVelocity();
+        double current_angular_velocity = payload->getAngularVelocity();
+
+        double dt = globals.TIMESTEP;
+        double mass = payload->getMass();
+        double inertia = payload->getMomentOfInertia();
+
+        Eigen::Vector2d required_force = (mass * (desired_velocity - current_velocity)) / dt;
+        double required_torque = (inertia * (desired_angular_velocity - current_angular_velocity)) / dt;
 
 
+    }
 }
 
 void Simulator::timestep(){

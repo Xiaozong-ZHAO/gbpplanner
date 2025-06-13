@@ -114,8 +114,29 @@ Eigen::Vector2d Payload::getPosition() const{
     return position_;
 }
 
-float Payload::getRotation() const{
-    return rotation_;
+float Payload::getMass() const {
+    if (physicsBody_) {
+        return physicsBody_->GetMass();
+    }
+    return 0.0f;
+}
+
+double Payload::getMomentOfInertia() const {
+    if (physicsBody_) {
+        return physicsBody_->GetInertia();
+    }
+    return 0.0;
+}
+
+double Payload::getAngularVelocity() const {
+    if (physicsBody_) {
+        return physicsBody_->GetAngularVelocity();
+    }
+    return 0.0;
+}
+
+Eigen::Quaterniond Payload::getRotation() const{
+    return current_orientation_;
 }
 
 Eigen::Vector2d Payload::getVelocity() const {

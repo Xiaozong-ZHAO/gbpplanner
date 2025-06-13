@@ -23,6 +23,11 @@ class Payload {
     int payload_id_;
     Eigen::Vector2d position_;
     Eigen::Vector2d target_position_;
+    Eigen::Quaterniond current_orientation_ = Eigen::Quaterniond::Identity();
+    Eigen::Quaterniond target_orientation_ = Eigen::Quaterniond::Identity();
+    double mass_;
+    double moment_of_inertia_;
+    double current_angular_velocity_;
     float width_, height_;
     float rotation_;
     Color color_;
@@ -47,11 +52,14 @@ class Payload {
     bool isAtTarget() const;
     Eigen::Vector2d getDistanceToTarget() const;
     float getDistanceToTargetMagnitude() const;
+    double getAngularVelocity() const;
+    float getMass() const;
+    double getMomentOfInertia() const;
     Eigen::Vector2d getRequiredPushDirection() const;
     bool shouldStopPushing() const;
     
     Eigen::Vector2d getPosition() const;
-    float getRotation() const;
+    Eigen::Quaterniond getRotation() const;
     Eigen::Vector2d getVelocity() const;
 
     private:

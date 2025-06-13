@@ -66,6 +66,7 @@ class Globals {
     float PAYLOAD_FRICTION;
     float TARGET_X;
     float TARGET_Y;
+    float MAX_ANGULAR_SPEED;
     
     Globals();
     int parse_global_args(DArgs::DArgs& dargs);

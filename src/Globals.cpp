@@ -51,6 +51,7 @@ void Globals::parse_global_args(std::ifstream& config_file){
     PAYLOAD_FRICTION = j["PAYLOAD_FRICTION"];
     TARGET_X = j["TARGET_X"];
     TARGET_Y = j["TARGET_Y"];
+    MAX_ANGULAR_SPEED = j["MAX_ANGULAR_SPEED"];
 
 }
 
