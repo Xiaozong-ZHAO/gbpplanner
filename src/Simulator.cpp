@@ -317,49 +317,74 @@ void Simulator::applyForcesToPayload(std::shared_ptr<Payload> payload,
     }
 }
 
-void Simulator::timestep(){
-
-    if (globals.SIM_MODE!=Timestep) return;
+// 修改timestep方法
+void Simulator::timestep() {
+    if (globals.SIM_MODE != Timestep) return;
     
-    // Create and/or destory factors depending on a robot's neighbours
-    computeLeastSquares();
+    // 根据配置选择控制方法
+    if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
+
+        updateDistributedPayloadControl();
+    } else {
+        computeLeastSquares(); // 保持原有的集中式控制
+    }
+    
     calculateRobotNeighbours(robots_);
+    
+    // 更新因子
     for (auto [r_id, robot] : robots_) {
+        if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
+            robot->updatePayloadFactors(payloads_);
+        }
         robot->updateInterrobotFactors();
     }
-
-    // If the communications failure rate is non-zero, activate/deactivate robot comms
+    
     setCommsFailure(globals.COMMS_FAILURE_RATE);
-
-    // Perform iterations of GBP. Ideally the internal and external iterations
-    // should be interleaved better. Here it is assumed there are an equal number.
-    for (int i=0; i<globals.NUM_ITERS; i++){
+    
+    // GBP迭代
+    for (int i = 0; i < globals.NUM_ITERS; i++) {
         iterateGBP(1, INTERNAL, robots_);
         iterateGBP(1, EXTERNAL, robots_);
     }
     
-    // Update the robot current and horizon states by one timestep
+    // 更新状态
     for (auto [r_id, robot] : robots_) {
         robot->updateHorizon();
         robot->updateCurrent();
     }
-
-    if (physicsWorld_){
+    
+    // 物理世界更新
+    if (physicsWorld_) {
         physicsWorld_->Step(globals.TIMESTEP, 8, 3);
-        for (auto [r_id, robot]: robots_){
+        for (auto [r_id, robot] : robots_) {
             robot->syncPhysicsToLogical();
         }
-
-        for (auto [p_id, payload]: payloads_){
+        for (auto [p_id, payload] : payloads_) {
             payload->update();
         }
     }
-
-    // Increase simulation clock by one timestep
+    
     clock_++;
-    if (clock_ >= globals.MAX_TIME ) globals.RUN = false;
+    if (clock_ >= globals.MAX_TIME) globals.RUN = false;
+}
 
-};
+// 简化 updateDistributedPayloadControl()
+void Simulator::updateDistributedPayloadControl() {
+    // 简单的状态监控
+    for (auto& [pid, payload] : payloads_) {
+        int connected_robots = 0;
+        for (auto& [rid, robot] : robots_) {
+            if (robot->isConnectedToPayload(pid)) {
+                connected_robots++;
+            }
+        }
+        
+        if (connected_robots > 0) {
+            std::cout << "Payload " << pid << " has " << connected_robots 
+                      << " robots connected via factors" << std::endl;
+        }
+    }
+}
 
 /*******************************************************************************/
 // Use a kd-tree to perform a radius search for neighbours of a robot within comms. range

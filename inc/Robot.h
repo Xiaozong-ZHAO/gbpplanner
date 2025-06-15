@@ -51,21 +51,20 @@ public:
     float height_3D_ = 0.f;                     // Height out of plane (for 3d visualisation only)
     Eigen::VectorXd position_;                  // Position of the robot (equivalent to taking the [x,y] of the current state of the robot)
     
-    std::vector<int> connected_payload_ids_;              // 类似connected_r_ids_
-    std::map<int, Eigen::Vector2d> assigned_contact_points_; // payload接触点分配
+    std::vector<int> connected_payload_ids_;       // 类似connected_r_ids_
+    int assigned_contact_point_index_;             // 分配的接触点索引（而不是坐标）
     b2Body* physicsBody_;
     b2World* physicsWorld_;
     bool usePhysics_;
 
-    // 新增payload相关方法（类似interrobot factors的管理）
+    // 简化后的payload相关方法
     void updatePayloadFactors(const std::map<int, std::shared_ptr<Payload>>& payloads);
     void createPayloadFactors(std::shared_ptr<Payload> payload);
     void deletePayloadFactors(std::shared_ptr<Payload> payload);
-    void assignContactPoint(int payload_id, const Eigen::Vector2d& contact_point);
     
-    // 辅助查询方法
+    // 查询方法
     bool isConnectedToPayload(int payload_id) const;
-    Eigen::Vector2d getAssignedContactPoint(int payload_id) const;
+    int getAssignedContactPointIndex() const { return assigned_contact_point_index_; }
     /****************************************/
     //Functions
     /****************************************/

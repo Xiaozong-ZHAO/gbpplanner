@@ -89,9 +89,9 @@ public:
                   Simulator* sim);
     
     Eigen::MatrixXd h_func_(const Eigen::VectorXd& X) override;
-    Eigen::MatrixXd J_func_(const Eigen::VectorXd& X) override;
+    // Eigen::MatrixXd J_func_(const Eigen::VectorXd& X) override;
     bool skip_factor() override;
-    // void draw() override;
+    void draw();
     
     int getPayloadId() const { return payload_->payload_id_; }
 
@@ -113,7 +113,7 @@ public:
                           Eigen::Vector2d contact_normal);
     
     Eigen::MatrixXd h_func_(const Eigen::VectorXd& X) override;
-    Eigen::MatrixXd J_func_(const Eigen::VectorXd& X) override;
+    // Eigen::MatrixXd J_func_(const Eigen::VectorXd& X) override;
     bool skip_factor() override;
     
     int getPayloadId() const { return payload_->payload_id_; }
