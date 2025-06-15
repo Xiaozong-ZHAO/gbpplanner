@@ -236,24 +236,26 @@ Eigen::VectorXd Simulator::solveConstrainedLeastSquares(const Eigen::MatrixXd &G
 }
 
 void Simulator::computeLeastSquares(){
-    // first compute desired payload velocity
-    // which is related to the current payload position and the target payload position
     for (auto& [pid, payload]: payloads_){
+        // 计算期望速度和角速度
         Eigen::Vector2d dist_to_target = payload->target_position_ - payload->position_;
-        Eigen::Vector2d desired_velocity = dist_to_target.normalized() * std::min(static_cast<double>(globals.MAX_SPEED), dist_to_target.norm());
+        Eigen::Vector2d desired_velocity = dist_to_target.normalized() * 
+            std::min(static_cast<double>(globals.MAX_SPEED), dist_to_target.norm());
 
         Eigen::Quaterniond relative_rotation = payload->target_orientation_ * payload->current_orientation_.inverse();
 
-        double rotation_error = 2.0 * std::acos(relative_rotation.w());
-        double rotation_direction = (relative_rotation.z() >=0 )? 1.0: -1.0;
+        double rotation_error = 2.0 * std::acos(std::abs(relative_rotation.w()));
+        double rotation_direction = (relative_rotation.z() >= 0) ? 1.0 : -1.0;
         double signed_rotation_error = rotation_direction * rotation_error;
 
         double desired_angular_velocity = std::copysign(1.0, signed_rotation_error) * 
             std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED), std::abs(signed_rotation_error));
         
+        // 获取当前状态
         Eigen::Vector2d current_velocity = payload->getVelocity();
         double current_angular_velocity = payload->getAngularVelocity();
 
+        // 计算所需的力和力矩
         double dt = globals.TIMESTEP;
         double mass = payload->getMass();
         double inertia = payload->getMomentOfInertia();
@@ -261,52 +263,69 @@ void Simulator::computeLeastSquares(){
         Eigen::Vector2d required_force = (mass * (desired_velocity - current_velocity)) / dt;
         double required_torque = (inertia * (desired_angular_velocity - current_angular_velocity)) / dt;
         
-        std::vector<Eigen::Vector2d> contact_points;
-        std::vector<Eigen::Vector2d> contact_normals;
-        for (auto& [rid, robot]: robots_) {
-            auto [point, normal] = getContactPoint(rid, pid);
-            contact_points.push_back(point);
-            contact_normals.push_back(normal);
-        }
-        Eigen::MatrixXd G(3, globals.NUM_ROBOTS);
+        // 使用固定的接触点和法向量
+        auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
+        
+        // 构建G矩阵
+        int num_contact_points = contact_points.size();
+        if (num_contact_points == 0) continue; // 没有接触点，跳过
+        
+        Eigen::MatrixXd G(3, num_contact_points);
         Eigen::Vector2d payload_center = payload->getPosition();
-        for (int i = 0; i < globals.NUM_ROBOTS; i++){
+        
+        for (int i = 0; i < num_contact_points; i++){
             G(0, i) = contact_normals[i].x();
             G(1, i) = contact_normals[i].y();
 
-            Eigen::Vector2d r = contact_points[i] - payload_center; // 从中心到接触点的向量
-            double torque_contribution = r.x() * contact_normals[i].y() - r.y() * contact_normals[i].x(); // 叉积的z分量
+            Eigen::Vector2d r = contact_points[i] - payload_center;
+            double torque_contribution = r.x() * contact_normals[i].y() - r.y() * contact_normals[i].x();
             G(2, i) = torque_contribution;
         }
 
-        
+        // 构建命令向量
         Eigen::Vector3d w_cmd;
         w_cmd << required_force.x(), required_force.y(), required_torque;
         
-        // 4. 求解最小二乘问题: min ||f||² s.t. G*f = w_cmd, f >= 0
+        // 求解最小二乘问题
         Eigen::VectorXd f = solveConstrainedLeastSquares(G, w_cmd);
-
-
-
+        
+        // 直接将计算出的力施加到payload上
+        applyForcesToPayload(payload, f, contact_points, contact_normals);
+        std::cout << "Solved forces: " << f.transpose() << std::endl;
     }
 }
 
-
+void Simulator::applyForcesToPayload(std::shared_ptr<Payload> payload, 
+                                   const Eigen::VectorXd& forces,
+                                   const std::vector<Eigen::Vector2d>& contact_points,
+                                   const std::vector<Eigen::Vector2d>& contact_normals) {
+    if (!payload->physicsBody_) return;
+    
+    // 遍历所有接触点，施加对应的力
+    for (int i = 0; i < forces.size() && i < contact_points.size(); i++) {
+        if (forces(i) > 0.01) { // 只施加显著的力
+            // 计算力向量
+            Eigen::Vector2d force_vector = forces(i) * contact_normals[i];
+            
+            // 转换为Box2D格式
+            b2Vec2 force_b2(force_vector.x(), force_vector.y());
+            b2Vec2 point_b2(contact_points[i].x(), contact_points[i].y());
+            
+            // 施加力到指定点
+            payload->physicsBody_->ApplyForce(force_b2, point_b2, true);
+        }
+    }
+}
 
 void Simulator::timestep(){
 
     if (globals.SIM_MODE!=Timestep) return;
     
     // Create and/or destory factors depending on a robot's neighbours
+    computeLeastSquares();
     calculateRobotNeighbours(robots_);
     for (auto [r_id, robot] : robots_) {
         robot->updateInterrobotFactors();
-
-        // std::cout << "Robot " << robot->rid_ << " physical position: " << std::endl;
-        // std::cout << robot->position_.transpose() << std::endl;
-
-        // std::cout << "Robot " << robot->rid_ << " factor position: " << std::endl;
-        // std::cout << robot->getVar(0)->mu_.transpose() << std::endl;
     }
 
     // If the communications failure rate is non-zero, activate/deactivate robot comms

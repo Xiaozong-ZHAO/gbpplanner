@@ -97,6 +97,157 @@ Robot::Robot(Simulator* sim,
 Robot::~Robot(){
 }
 
+void Robot::updatePayloadFactors(const std::map<int, std::shared_ptr<Payload>>& payloads) {
+    // 检查当前连接的payload，如果距离太远则删除因子
+    for (auto it = connected_payload_ids_.begin(); it != connected_payload_ids_.end();) {
+        int pid = *it;
+        auto payload_it = payloads.find(pid);
+        
+        bool should_disconnect = false;
+        if (payload_it == payloads.end()) {
+            should_disconnect = true; // payload不存在
+        } else {
+            double distance = (position_.head(2) - payload_it->second->getPosition()).norm();
+            if (distance > globals.CONTACT_ASSIGNMENT_RADIUS) {
+                should_disconnect = true; // 距离太远
+            }
+        }
+        
+        if (should_disconnect) {
+            if (payload_it != payloads.end()) {
+                deletePayloadFactors(payload_it->second);
+            }
+            it = connected_payload_ids_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    
+    // 检查附近的payload，如果有分配且未连接则创建因子
+    for (auto& [pid, payload] : payloads) {
+        bool has_assignment = assigned_contact_points_.find(pid) != assigned_contact_points_.end();
+        bool is_connected = std::find(connected_payload_ids_.begin(), connected_payload_ids_.end(), pid) 
+                           != connected_payload_ids_.end();
+        
+        if (has_assignment && !is_connected) {
+            double distance = (position_.head(2) - payload->getPosition()).norm();
+            if (distance <= globals.CONTACT_ASSIGNMENT_RADIUS) {
+                createPayloadFactors(payload);
+            }
+        }
+    }
+}
+
+void Robot::createPayloadFactors(std::shared_ptr<Payload> payload) {
+    int pid = payload->payload_id_;
+    auto contact_point_it = assigned_contact_points_.find(pid);
+    if (contact_point_it == assigned_contact_points_.end()) {
+        return; // 没有分配接触点
+    }
+    
+    Eigen::Vector2d target_contact_point = contact_point_it->second;
+    
+    // 获取对应的接触法向量
+    auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
+    Eigen::Vector2d contact_normal = Eigen::Vector2d(1, 0); // 默认法向量
+    
+    // 找到最接近的预设接触点对应的法向量
+    double min_distance = std::numeric_limits<double>::max();
+    for (int i = 0; i < contact_points.size(); i++) {
+        Eigen::Vector2d local_point = contact_points[i] - payload->getPosition();
+        double distance = (local_point - target_contact_point).norm();
+        if (distance < min_distance) {
+            min_distance = distance;
+            contact_normal = contact_normals[i];
+        }
+    }
+    
+    // 为除了当前状态外的所有变量创建payload因子
+    for (int i = 1; i < num_variables_; i++) {
+        std::vector<std::shared_ptr<Variable>> variables{getVar(i)};
+        
+        // 创建接触保持因子
+        auto contact_factor = std::make_shared<ContactFactor>(
+            sim_->next_fid_++, rid_, variables,
+            globals.SIGMA_FACTOR_CONTACT,
+            Eigen::VectorXd::Zero(1),
+            payload, target_contact_point, sim_
+        );
+        
+        // 创建速度对齐因子
+        auto velocity_factor = std::make_shared<PayloadVelocityFactor>(
+            sim_->next_fid_++, rid_, variables,
+            globals.SIGMA_FACTOR_PAYLOAD_VELOCITY,
+            Eigen::VectorXd::Zero(2),
+            payload, contact_normal
+        );
+        
+        // 添加到变量的因子列表
+        for (auto var : contact_factor->variables_) var->add_factor(contact_factor);
+        for (auto var : velocity_factor->variables_) var->add_factor(velocity_factor);
+        
+        // 添加到robot的factors_映射
+        this->factors_[contact_factor->key_] = contact_factor;
+        this->factors_[velocity_factor->key_] = velocity_factor;
+    }
+    
+    // 添加到connected payloads列表
+    this->connected_payload_ids_.push_back(payload->payload_id_);
+}
+
+void Robot::deletePayloadFactors(std::shared_ptr<Payload> payload) {
+    std::vector<Key> factors_to_delete{};
+    
+    // 查找所有与此payload相关的因子
+    for (auto& [f_key, fac] : this->factors_) {
+        if (fac->factor_type_ == CONTACT_FACTOR) {
+            if (auto contact_fac = std::dynamic_pointer_cast<ContactFactor>(fac)) {
+                if (contact_fac->getPayloadId() == payload->payload_id_) {
+                    factors_to_delete.push_back(f_key);
+                }
+            }
+        } else if (fac->factor_type_ == PAYLOAD_VELOCITY_FACTOR) {
+            if (auto velocity_fac = std::dynamic_pointer_cast<PayloadVelocityFactor>(fac)) {
+                if (velocity_fac->getPayloadId() == payload->payload_id_) {
+                    factors_to_delete.push_back(f_key);
+                }
+            }
+        }
+    }
+    
+    // 删除因子
+    for (auto f_key : factors_to_delete) {
+        auto fac = this->factors_[f_key];
+        for (auto& var : fac->variables_) {
+            var->delete_factor(f_key);
+        }
+        this->factors_.erase(f_key);
+    }
+    
+    // 删除接触点分配
+    assigned_contact_points_.erase(payload->payload_id_);
+}
+
+void Robot::assignContactPoint(int payload_id, const Eigen::Vector2d& contact_point) {
+    assigned_contact_points_[payload_id] = contact_point;
+    std::cout << "Robot " << rid_ << " assigned to contact point " 
+              << contact_point.transpose() << " on payload " << payload_id << std::endl;
+}
+
+bool Robot::isConnectedToPayload(int payload_id) const {
+    return std::find(connected_payload_ids_.begin(), connected_payload_ids_.end(), payload_id) 
+           != connected_payload_ids_.end();
+}
+
+Eigen::Vector2d Robot::getAssignedContactPoint(int payload_id) const {
+    auto it = assigned_contact_points_.find(payload_id);
+    if (it != assigned_contact_points_.end()) {
+        return it->second;
+    }
+    return Eigen::Vector2d::Zero();
+}
+
+
 void Robot::createPhysicsBody(){
 
     if (!physicsWorld_) {

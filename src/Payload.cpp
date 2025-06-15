@@ -153,54 +153,42 @@ std::pair<std::vector<Eigen::Vector2d>, std::vector<Eigen::Vector2d>> Payload::g
     
     if (!physicsBody_) return {points, normals};
     
-    // 获取Box2D的形状信息
-    b2Fixture* fixture = physicsBody_->GetFixtureList();
-    b2PolygonShape* shape = (b2PolygonShape*)fixture->GetShape();
-    b2Transform transform = physicsBody_->GetTransform();
+    // 直接使用payload的几何信息，不依赖Box2D的顶点顺序
+    Eigen::Vector2d center = position_;
+    double rotation = getRotationFromQuaternion(current_orientation_);
     
-    // 获取所有世界坐标的顶点
-    std::vector<Eigen::Vector2d> vertices;
-    for (int i = 0; i < shape->m_count; i++) {
-        b2Vec2 worldVertex = b2Mul(transform, shape->m_vertices[i]);
-        vertices.push_back(Eigen::Vector2d(worldVertex.x, worldVertex.y));
-    }
+    // 旋转矩阵
+    Eigen::Matrix2d rot;
+    rot << cos(rotation), -sin(rotation),
+           sin(rotation),  cos(rotation);
     
-    // 假设vertices按逆时针顺序：[0]左下, [1]右下, [2]右上, [3]左上
-    Eigen::Vector2d center = position_; // payload中心
+    // 在局部坐标系中定义接触点和法向量
+    // 上边的两个点
+    Eigen::Vector2d local_top1(-width_/4, -height_/2);
+    Eigen::Vector2d local_top2(width_/4, -height_/2);
+    Eigen::Vector2d local_top_normal(0, 1); // 向payload内部（向下）
     
-    // 上边：从vertices[3]到vertices[2]
-    Eigen::Vector2d topEdgeDir = vertices[2] - vertices[3];
-    Eigen::Vector2d topNormal(-topEdgeDir.y(), topEdgeDir.x()); // 垂直向量
-    topNormal.normalize();
+    // 左边的两个点
+    Eigen::Vector2d local_left1(-width_/2, height_/4);
+    Eigen::Vector2d local_left2(-width_/2, -height_/4);
+    Eigen::Vector2d local_left_normal(1, 0); // 向payload内部（向右）
     
-    // 确保法向量指向payload内部
-    Eigen::Vector2d topMidpoint = 0.5 * (vertices[2] + vertices[3]);
-    if ((center - topMidpoint).dot(topNormal) < 0) {
-        topNormal = -topNormal;
-    }
+    // 转换到世界坐标系
+    points.push_back(center + rot * local_top1);
+    points.push_back(center + rot * local_top2);
+    points.push_back(center + rot * local_left1);
+    points.push_back(center + rot * local_left2);
     
-    // 添加上边的两个接触点和法向量
-    points.push_back(vertices[3] + 0.25 * topEdgeDir);
-    points.push_back(vertices[3] + 0.75 * topEdgeDir);
-    normals.push_back(topNormal);
-    normals.push_back(topNormal);
-    
-    // 左边：从vertices[3]到vertices[0]
-    Eigen::Vector2d leftEdgeDir = vertices[0] - vertices[3];
-    Eigen::Vector2d leftNormal(-leftEdgeDir.y(), leftEdgeDir.x()); // 垂直向量
-    leftNormal.normalize();
-    
-    // 确保法向量指向payload内部
-    Eigen::Vector2d leftMidpoint = 0.5 * (vertices[0] + vertices[3]);
-    if ((center - leftMidpoint).dot(leftNormal) < 0) {
-        leftNormal = -leftNormal;
-    }
-    
-    // 添加左边的两个接触点和法向量
-    points.push_back(vertices[3] + 0.25 * leftEdgeDir);
-    points.push_back(vertices[3] + 0.75 * leftEdgeDir);
-    normals.push_back(leftNormal);
-    normals.push_back(leftNormal);
+    normals.push_back(rot * local_top_normal);
+    normals.push_back(rot * local_top_normal);
+    normals.push_back(rot * local_left_normal);
+    normals.push_back(rot * local_left_normal);
     
     return {points, normals};
+}
+
+// 辅助函数：从四元数提取2D旋转角度
+double Payload::getRotationFromQuaternion(const Eigen::Quaterniond& q) const {
+    return atan2(2.0 * (q.w() * q.z() + q.x() * q.y()), 
+                 1.0 - 2.0 * (q.y() * q.y() + q.z() * q.z()));
 }

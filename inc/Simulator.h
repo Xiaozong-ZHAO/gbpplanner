@@ -66,6 +66,10 @@ public:
     bool isRobotContactingPayload(int robot_id, int payload_id);
     b2World* physicsWorld_ = nullptr;
     void computeLeastSquares();
+    void applyForcesToPayload(std::shared_ptr<Payload> payload, 
+                                   const Eigen::VectorXd& forces,
+                                   const std::vector<Eigen::Vector2d>& contact_points,
+                                   const std::vector<Eigen::Vector2d>& contact_normals);
 
 
     b2World* getPhysicsWorld(){
@@ -80,6 +84,12 @@ public:
     // New formations must modify the vectors "robots to create" and optionally "robots_to_delete"
     // by appending (push_back()) a shared pointer to a Robot class.
     /*******************************************************************************/    
+    void assignContactPoints();
+    void updateDistributedPayloadControl();
+    // 辅助方法
+    std::vector<int> getNearbyRobots(int payload_id, double radius);
+    void reassignLostContacts(int payload_id);
+    
     void createSingleRobot();
     void createOrDeleteRobots();
     void isRobotContactngPayload(int robot_id, int payload_id);
