@@ -528,166 +528,56 @@ void Simulator::createOrDeleteRobots(){
             robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
         }
     } else if (globals.FORMATION == "Payload") {
-    new_robots_needed_ = false;
-    float robot_radius = globals.ROBOT_RADIUS;
-    
-    // 获取payload信息
-    if (payloads_.empty()) return; // 如果没有payload，直接返回
-    
-    auto payload = payloads_.begin()->second; // 获取第一个payload
-    Eigen::Vector2d payload_pos = payload->getPosition();
-    Eigen::Vector2d target_pos = payload->target_position_;
-    
-    // 计算payload到目标的方向向量
-    Eigen::Vector2d direction = target_pos - payload_pos;
-    if (direction.norm() < 0.01) {
-        // 如果已经到达目标，不创建机器人
-        return;
-    }
-    
-    // 归一化方向向量
-    direction.normalize();
-    
-    // 获取payload尺寸
-    float payload_width = globals.PAYLOAD_WIDTH;
-    float payload_height = globals.PAYLOAD_HEIGHT;
-    float robot_spacing = 2.5f * robot_radius;
-    float push_distance = 1.2f * robot_radius;
-    
-    // 计算水平和垂直分量的绝对值
-    float horizontal_component = std::abs(direction.x());
-    float vertical_component = std::abs(direction.y());
-    
-    std::vector<std::pair<Eigen::Vector2d, Eigen::Vector2d>> robot_positions_goals;
-    
-    // 确定需要推力的边
-    bool need_horizontal_push = horizontal_component > 0.1; // 需要水平方向推力
-    bool need_vertical_push = vertical_component > 0.1;     // 需要垂直方向推力
-    
-    int robots_assigned = 0;
-    
-    if (need_horizontal_push && need_vertical_push) {
-        // 需要两个方向的推力，按比例分配机器人
-        int horizontal_robots = (int)std::round(globals.NUM_ROBOTS * horizontal_component / (horizontal_component + vertical_component));
-        int vertical_robots = globals.NUM_ROBOTS - horizontal_robots;
+        new_robots_needed_ = false;
+        float robot_radius = globals.ROBOT_RADIUS;
         
-        // 确定推力方向（根据目标在payload的哪一边）
-        int horizontal_side = (direction.x() > 0) ? 3 : 1; // 目标在右边推左边(3)，目标在左边推右边(1)
-        int vertical_side = (direction.y() > 0) ? 2 : 0;   // 目标在上边推下边(2)，目标在下边推上边(0)
+        // 获取payload信息
+        if (payloads_.empty()) return; // 如果没有payload，直接返回
         
-        // 放置水平推力机器人
-        // 放置水平推力机器人
-for (int i = 0; i < horizontal_robots; i++) {
-    Eigen::Vector2d start_pos, goal_pos;
-    float push_offset = 10.0f; // 推力位移量，可以调整
-    
-    if (horizontal_side == 1) { // 右边
-        float y_offset = -payload_height/2.0f + (i + 1) * payload_height / (horizontal_robots + 1);
-        start_pos = Eigen::Vector2d(payload_pos.x() + payload_width/2.0f + push_distance,
-                                  payload_pos.y() + y_offset);
-        // goal_pos向左移动（朝payload方向推）
-        goal_pos = Eigen::Vector2d(start_pos.x() - push_offset, start_pos.y());
-    } else { // 左边
-        float y_offset = -payload_height/2.0f + (i + 1) * payload_height / (horizontal_robots + 1);
-        start_pos = Eigen::Vector2d(payload_pos.x() - payload_width/2.0f - push_distance,
-                                  payload_pos.y() + y_offset);
-        // goal_pos向右移动（朝payload方向推）
-        goal_pos = Eigen::Vector2d(start_pos.x() + push_offset, start_pos.y());
-    }
-    robot_positions_goals.push_back({start_pos, goal_pos});
-}
-
-// 放置垂直推力机器人
-for (int i = 0; i < vertical_robots; i++) {
-    Eigen::Vector2d start_pos, goal_pos;
-    float push_offset = 10.0f; // 推力位移量，可以调整
-    
-    if (vertical_side == 0) { // 上边
-        float x_offset = -payload_width/2.0f + (i + 1) * payload_width / (vertical_robots + 1);
-        start_pos = Eigen::Vector2d(payload_pos.x() + x_offset,
-                                  payload_pos.y() + payload_height/2.0f + push_distance);
-        // goal_pos向下移动（朝payload方向推）
-        goal_pos = Eigen::Vector2d(start_pos.x(), start_pos.y() - push_offset);
-    } else { // 下边
-        float x_offset = -payload_width/2.0f + (i + 1) * payload_width / (vertical_robots + 1);
-        start_pos = Eigen::Vector2d(payload_pos.x() + x_offset,
-                                  payload_pos.y() - payload_height/2.0f - push_distance);
-        // goal_pos向上移动（朝payload方向推）
-        goal_pos = Eigen::Vector2d(start_pos.x(), start_pos.y() + push_offset);
-    }
-    robot_positions_goals.push_back({start_pos, goal_pos});
-}
+        auto payload = payloads_.begin()->second; // 获取第一个payload
+        auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
         
-    } else if (need_horizontal_push) {
-        // 只需要水平推力
-        int side = (direction.x() > 0) ? 3 : 1; // 左边或右边
+        if (contact_points.empty()) {
+            std::cout << "Warning: No contact points available for payload" << std::endl;
+            return;
+        }
         
+        // 为每个机器人分配一个接触点索引
         for (int i = 0; i < globals.NUM_ROBOTS; i++) {
-            Eigen::Vector2d start_pos, goal_pos;
-            float y_offset = -payload_height/2.0f + (i + 1) * payload_height / (globals.NUM_ROBOTS + 1);
+            int contact_point_index = i % contact_points.size(); // 循环分配接触点
             
-            if (side == 1) { // 右边推
-                start_pos = Eigen::Vector2d(payload_pos.x() + payload_width/2.0f + push_distance, 
-                                          payload_pos.y() + y_offset);
-            } else { // 左边推
-                start_pos = Eigen::Vector2d(payload_pos.x() - payload_width/2.0f - push_distance, 
-                                          payload_pos.y() + y_offset);
-            }
-            goal_pos = start_pos;
-            robot_positions_goals.push_back({start_pos, goal_pos});
-        }
-        
-    } else if (need_vertical_push) {
-        // 只需要垂直推力
-        int side = (direction.y() > 0) ? 2 : 0; // 下边或上边
-        
-        for (int i = 0; i < globals.NUM_ROBOTS; i++) {
-            Eigen::Vector2d start_pos, goal_pos;
-            float x_offset = -payload_width/2.0f + (i + 1) * payload_width / (globals.NUM_ROBOTS + 1);
+            // 获取对应的接触点和法向量
+            Eigen::Vector2d contact_point = contact_points[contact_point_index];
+            Eigen::Vector2d contact_normal = contact_normals[contact_point_index];
             
-            if (side == 0) { // 上边推
-                start_pos = Eigen::Vector2d(payload_pos.x() + x_offset, 
-                                          payload_pos.y() + payload_height/2.0f + push_distance);
-            } else { // 下边推
-                start_pos = Eigen::Vector2d(payload_pos.x() + x_offset, 
-                                          payload_pos.y() - payload_height/2.0f - push_distance);
-            }
-            goal_pos = start_pos;
-            robot_positions_goals.push_back({start_pos, goal_pos});
-        }
-    }
-    
-    // 创建机器人
-    for (int i = 0; i < robot_positions_goals.size(); ++i) {
-        Eigen::VectorXd starting(4);
-        starting << robot_positions_goals[i].first.x(), robot_positions_goals[i].first.y(), 0.0, 0.0;
-        
-        Eigen::VectorXd ending(4);
-        ending << robot_positions_goals[i].second.x(), robot_positions_goals[i].second.y(), 0.0, 0.0;
-        
-        std::deque<Eigen::VectorXd> waypoints{starting, ending};
-        
-        // 根据推力方向设置颜色
-        Color robot_color;
-        if (need_horizontal_push && need_vertical_push) {
-            robot_color = (i < globals.NUM_ROBOTS * horizontal_component / (horizontal_component + vertical_component)) ? 
-                         ColorFromHSV(0.0f, 1.0f, 0.75f) :    // 红色 - 水平推力
-                         ColorFromHSV(240.0f, 1.0f, 0.75f);   // 蓝色 - 垂直推力
-        } else if (need_horizontal_push) {
-            robot_color = ColorFromHSV(0.0f, 1.0f, 0.75f);     // 红色 - 水平推力
-        } else {
-            robot_color = ColorFromHSV(240.0f, 1.0f, 0.75f);   // 蓝色 - 垂直推力
+            // 机器人初始位置：接触点 - 机器人半径 * 法向量
+            // 这样确保机器人刚好接触payload
+            Eigen::Vector2d robot_start_pos = contact_point - robot_radius * contact_normal;
+            
+            Eigen::VectorXd starting(4);
+            starting << robot_start_pos.x(), robot_start_pos.y(), 0.0, 0.0;
+            
+            Eigen::VectorXd ending = starting; // 初始目标就是起始位置
+            
+            std::deque<Eigen::VectorXd> waypoints{starting, ending};
+            
+            // 根据接触点索引设置颜色
+            Color robot_color = ColorFromHSV(contact_point_index * 360.0f / contact_points.size(), 1.0f, 0.75f);
+            
+            auto robot = std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld());
+            
+            // 关键：在创建时就分配接触点索引
+            robot->assigned_contact_point_index_ = contact_point_index;
+            
+            robots_to_create.push_back(robot);
+            
+            // 调试输出
+            std::cout << "Robot " << robot->rid_ << " assigned to contact point " << contact_point_index 
+                      << " at position (" << contact_point.x() << ", " << contact_point.y() << ")" 
+                      << " with start position (" << robot_start_pos.x() << ", " << robot_start_pos.y() << ")" << std::endl;
         }
         
-        robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
-        
-        // 调试输出
-        std::cout << "Robot " << i << " (Push direction): " 
-                  << "Start(" << starting.x() << "," << starting.y() << ") -> "
-                  << "Goal(" << ending.x() << "," << ending.y() << ")" << std::endl;
-    }
-
-    }else if (globals.FORMATION=="junction"){
+    } else if (globals.FORMATION=="junction"){
     // Robots in a cross-roads style junction. There is only one-way traffic, and no turning.        
         new_robots_needed_ = true;      // This is needed so that more robots can be created as the simulation progresses.
         if (clock_%20==0){              // Arbitrary condition on the simulation time to create new robots
@@ -715,7 +605,6 @@ for (int i = 0; i < vertical_robots; i++) {
                 robots_to_delete.push_back(robot);
             }
         }
-
 
     } else if (globals.FORMATION=="junction_twoway"){
     // Robots in a two-way junction, turning LEFT (RED), RIGHT (BLUE) or STRAIGHT (GREEN)
@@ -761,8 +650,7 @@ for (int i = 0; i < vertical_robots; i++) {
     for (auto robot : robots_to_delete){
         deleteRobot(robot);
     };
-
-};
+}
 
 /*******************************************************************************/
 // Deletes the robot from the simulator's robots_, as well as any variable/factors associated.
