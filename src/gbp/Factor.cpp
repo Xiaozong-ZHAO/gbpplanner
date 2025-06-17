@@ -270,10 +270,29 @@ Eigen::MatrixXd PayloadVelocityFactor::h_func_(const Eigen::VectorXd& X) {
     return h;
 }
 
+// std::pair<double, double> PayloadVelocityFactor::computeDesiredPayloadMotion() {
+//     if (!payload_) return {0.0, 0.0};
+    
+//     // 线速度分量
+//     Eigen::Vector2d payload_to_target = payload_->target_position_ - payload_->position_;
+//     double desired_linear_velocity_component = 0.0;
+    
+//     if (payload_to_target.norm() > 0.1) {
+//         Eigen::Vector2d desired_velocity = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
+//         desired_linear_velocity_component = desired_velocity.dot(contact_normal_);
+//     }
+    
+//     // 角速度（如果有目标朝向）
+//     double desired_angular_velocity = 0.0;
+//     // 这里可以根据需要添加旋转控制逻辑
+    
+//     return {desired_linear_velocity_component, desired_angular_velocity};
+// }
+
 std::pair<double, double> PayloadVelocityFactor::computeDesiredPayloadMotion() {
     if (!payload_) return {0.0, 0.0};
     
-    // 线速度分量
+    // 线速度分量（保持现有逻辑）
     Eigen::Vector2d payload_to_target = payload_->target_position_ - payload_->position_;
     double desired_linear_velocity_component = 0.0;
     
@@ -282,9 +301,21 @@ std::pair<double, double> PayloadVelocityFactor::computeDesiredPayloadMotion() {
         desired_linear_velocity_component = desired_velocity.dot(contact_normal_);
     }
     
-    // 角速度（如果有目标朝向）
+    // 角速度（使用修复后的旋转误差计算）
     double desired_angular_velocity = 0.0;
-    // 这里可以根据需要添加旋转控制逻辑
+    double rotation_error = payload_->getRotationError();
+    
+    if (std::abs(rotation_error) > 0.01) {  // 只有当旋转误差显著时才施加角速度
+        desired_angular_velocity = std::copysign(1.0, rotation_error) * 
+            std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), std::abs(rotation_error));
+        
+        // 调试输出
+        static int debug_counter = 0;
+        if (debug_counter++ % 60 == 0) {
+            std::cout << "Rotation error: " << rotation_error << " rad, desired angular vel: " 
+                      << desired_angular_velocity << std::endl;
+        }
+    }
     
     return {desired_linear_velocity_component, desired_angular_velocity};
 }

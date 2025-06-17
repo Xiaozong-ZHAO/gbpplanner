@@ -56,6 +56,7 @@ public:
     b2Body* physicsBody_;
     b2World* physicsWorld_;
     bool usePhysics_;
+    b2WeldJoint* payload_joint_;  // 新增：与payload的焊接关节
 
     // 简化后的payload相关方法
     void updatePayloadFactors(const std::map<int, std::shared_ptr<Payload>>& payloads);
@@ -65,6 +66,10 @@ public:
     // 查询方法
     bool isConnectedToPayload(int payload_id) const;
     int getAssignedContactPointIndex() const { return assigned_contact_point_index_; }
+
+    void attachToPayload(std::shared_ptr<Payload> payload, const Eigen::Vector2d& attach_point);
+    void detachFromPayload();
+    bool isAttachedToPayload() const { return payload_joint_ != nullptr; }
     /****************************************/
     //Functions
     /****************************************/

@@ -23,6 +23,7 @@ class Payload {
     int payload_id_;
     Eigen::Vector2d position_;
     Eigen::Vector2d target_position_;
+    Eigen::Quaterniond initial_orientation_ = Eigen::Quaterniond::Identity();
     Eigen::Quaterniond current_orientation_ = Eigen::Quaterniond::Identity();
     Eigen::Quaterniond target_orientation_ = Eigen::Quaterniond::Identity();
     double mass_;
@@ -51,6 +52,7 @@ class Payload {
     double getRotationFromQuaternion(const Eigen::Quaterniond& q) const;
 
     void setTarget(const Eigen::Vector2d& target);
+    void setTarget(const Eigen::Vector2d& target_position, const Eigen::Quaterniond& target_orientation);
     bool isAtTarget() const;
     Eigen::Vector2d getDistanceToTarget() const;
     float getDistanceToTargetMagnitude() const;
@@ -63,6 +65,10 @@ class Payload {
     Eigen::Vector2d getPosition() const;
     Eigen::Quaterniond getRotation() const;
     Eigen::Vector2d getVelocity() const;
+    double getRotationError() const;
+
+    void setTargetFromRelativeRotation(double relative_rotation_rad);  // 新增方法
+    void updateTargetOrientation();  // 新增：更新目标朝向的方法
 
     private:
         Simulator* sim_;

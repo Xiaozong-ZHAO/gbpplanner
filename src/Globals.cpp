@@ -58,6 +58,12 @@ void Globals::parse_global_args(std::ifstream& config_file){
     USE_DISTRIBUTED_PAYLOAD_CONTROL = static_cast<bool>((int)j["USE_DISTRIBUTED_PAYLOAD_CONTROL"]);
     CONTACT_ASSIGNMENT_RADIUS = j["CONTACT_ASSIGNMENT_RADIUS"];
 
+    TARGET_RELATIVE_X = j["TARGET_RELATIVE_X"];
+    TARGET_RELATIVE_Y = j["TARGET_RELATIVE_Y"];
+    TARGET_RELATIVE_ROTATION = j["TARGET_RELATIVE_ROTATION"];
+    USE_RIGID_ATTACHMENT = static_cast<bool>((int)j["USE_RIGID_ATTACHMENT"]);
+    USE_DIRECT_PAYLOAD_VELOCITY = static_cast<bool>((int)j["USE_DIRECT_PAYLOAD_VELOCITY"]);  // 新增
+
 }
 
 Globals::Globals(){};

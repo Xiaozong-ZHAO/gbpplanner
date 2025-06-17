@@ -71,6 +71,12 @@ class Globals {
     float TARGET_X;
     float TARGET_Y;
     float MAX_ANGULAR_SPEED;
+
+    float TARGET_RELATIVE_X;
+    float TARGET_RELATIVE_Y;
+    float TARGET_RELATIVE_ROTATION;
+    bool USE_RIGID_ATTACHMENT;
+    bool USE_DIRECT_PAYLOAD_VELOCITY; // 是否使用直接速度控制
     
     Globals();
     int parse_global_args(DArgs::DArgs& dargs);

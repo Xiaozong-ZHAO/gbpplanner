@@ -21,7 +21,7 @@ Robot::Robot(Simulator* sim,
              sim_(sim), rid_(rid),
              waypoints_(waypoints),
              robot_radius_(size), color_(color),
-             physicsWorld_(world), usePhysics_(world != nullptr) {
+             physicsWorld_(world), usePhysics_(world != nullptr), payload_joint_(nullptr) {
 
     height_3D_ = robot_radius_;     // Height out of plane for 3d visualisation only
 
@@ -95,6 +95,50 @@ Robot::Robot(Simulator* sim,
 /* Destructor */
 /***************************************************************************************************/
 Robot::~Robot(){
+    detachFromPayload();
+}
+
+// Robot.cpp 中的正确实现
+
+void Robot::attachToPayload(std::shared_ptr<Payload> payload, const Eigen::Vector2d& attach_point) {
+    if (!physicsBody_ || !payload->physicsBody_) {
+        std::cout << "Error: Cannot attach - missing physics bodies" << std::endl;
+        return;
+    }
+    
+    if (payload_joint_) {
+        detachFromPayload(); // 先断开现有连接
+    }
+    
+    // 创建焊接关节定义
+    b2WeldJointDef jointDef;
+    jointDef.bodyA = physicsBody_;           // 机器人
+    jointDef.bodyB = payload->physicsBody_;  // payload
+    
+    // 设置连接点（局部坐标）
+    jointDef.localAnchorA = physicsBody_->GetLocalPoint(b2Vec2(attach_point.x(), attach_point.y()));
+    jointDef.localAnchorB = payload->physicsBody_->GetLocalPoint(b2Vec2(attach_point.x(), attach_point.y()));
+    
+    // 设置相对角度（保持当前相对角度）
+    jointDef.referenceAngle = payload->physicsBody_->GetAngle() - physicsBody_->GetAngle();
+    
+    // 使用正确的参数名
+    jointDef.stiffness = 30000.0f;  // 刚度 (N*m) - 数值越大越"硬"
+    jointDef.damping = 1000.0f;     // 阻尼 (N*m*s) - 防止震荡
+    
+    // 创建关节
+    payload_joint_ = (b2WeldJoint*)physicsWorld_->CreateJoint(&jointDef);
+    
+    std::cout << "Robot " << rid_ << " attached to payload at (" 
+              << attach_point.x() << ", " << attach_point.y() << ")" << std::endl;
+}
+
+void Robot::detachFromPayload() {
+    if (payload_joint_ && physicsWorld_) {
+        physicsWorld_->DestroyJoint(payload_joint_);
+        payload_joint_ = nullptr;
+        std::cout << "Robot " << rid_ << " detached from payload" << std::endl;
+    }
 }
 
 void Robot::updatePayloadFactors(const std::map<int, std::shared_ptr<Payload>>& payloads) {

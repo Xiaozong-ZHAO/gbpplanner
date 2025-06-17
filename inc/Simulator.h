@@ -99,6 +99,9 @@ public:
     std::vector<Eigen::Vector2d> getFixedContactNormals(std::shared_ptr<Payload> payload);
     Eigen::VectorXd solveConstrainedLeastSquares(const Eigen::MatrixXd &G, const Eigen::Vector3d& w_cmd);
     std::shared_ptr<Payload> getPayload(int payload_id);
+    void applyDirectPayloadVelocityControl();
+    Eigen::Vector2d computeDesiredPayloadVelocity(std::shared_ptr<Payload> payload);
+    double computeDesiredPayloadAngularVelocity(std::shared_ptr<Payload> payload);
 
     /*******************************************************************************/
     // Set a proportion of robots to not perform inter-robot communications

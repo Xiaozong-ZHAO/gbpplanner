@@ -26,6 +26,7 @@ Payload::Payload(Simulator* sim,
     physicsBody_(nullptr),
     task_completed_(false),
     target_tolerance_(2.0f), // 默认容忍距离
+    target_orientation_(Eigen::Quaterniond::Identity()),
     velocity_(Eigen::Vector2d::Zero()) {
         physicsWorld_ = sim->getPhysicsWorld();
         if (physicsWorld_){
@@ -66,18 +67,36 @@ void Payload::createPhysicsBody(float density){
     physicsBody_->SetAngularDamping(0.3f);  // 角度阻
 }
 
+void Payload::setTargetFromRelativeRotation(double relative_rotation_rad) {
+    // target_orientation = initial_orientation * relative_rotation
+    Eigen::Quaterniond relative_rotation(cos(relative_rotation_rad/2), 0, 0, sin(relative_rotation_rad/2));
+    target_orientation_ = initial_orientation_ * relative_rotation;
+    
+    std::cout << "Target orientation set: initial + " << relative_rotation_rad 
+              << " rad = " << getRotationFromQuaternion(target_orientation_) << " rad" << std::endl;
+}
+
 void Payload::update() {
     if (physicsBody_) {
         b2Vec2 physpos = physicsBody_->GetPosition();
         position_.x() = physpos.x;
         position_.y() = physpos.y;
         rotation_ = physicsBody_->GetAngle();
+        
+        // 正确更新current_orientation_
+        current_orientation_ = Eigen::Quaterniond(cos(rotation_/2), 0, 0, sin(rotation_/2));
     }
 }
 
 void Payload::setTarget(const Eigen::Vector2d& target) {
     target_position_ = target;
     task_completed_ = false; // 重置任务完成状态
+}
+
+void Payload::setTarget(const Eigen::Vector2d& target_position, const Eigen::Quaterniond& target_orientation) {
+    target_position_ = target_position;
+    target_orientation_ = target_orientation;
+    task_completed_ = false;
 }
 
 void Payload::draw() {
@@ -89,6 +108,7 @@ void Payload::draw() {
     // 根据任务状态选择颜色
     Color drawColor = task_completed_ ? GREEN : color_;
     
+    // 绘制当前payload
     rlPushMatrix();
     rlTranslatef(position3D.x, position3D.y, position3D.z);
     rlRotatef(- rotation_ * RAD2DEG, 0, 1, 0);
@@ -96,16 +116,64 @@ void Payload::draw() {
     DrawCubeWires({0, 0, 0}, size.x, size.y, size.z, BLACK);
     rlPopMatrix();
     
-    // 绘制目标位置
+    // 绘制目标位置（保持原有逻辑）
     Vector3 targetPos3D = {static_cast<float>(target_position_.x()), 0.1f, static_cast<float>(target_position_.y())};
-    DrawCube(targetPos3D, size.x * 1.1f, 0.2f, size.z * 1.1f, ColorAlpha(RED, 0.3f));
-    DrawCubeWires(targetPos3D, size.x * 1.1f, 0.2f, size.z * 1.1f, RED);
     
-    // 绘制payload到目标的连线
+    // 新增：绘制带有目标朝向的目标位置
+    rlPushMatrix();
+    rlTranslatef(targetPos3D.x, targetPos3D.y, targetPos3D.z);
+    
+    // 计算目标朝向角度
+    double target_angle = getRotationFromQuaternion(target_orientation_);
+    rlRotatef(-target_angle * RAD2DEG, 0, 1, 0);  // 应用目标朝向
+    
+    // 绘制目标位置的立方体（带朝向）
+    DrawCube({0, 0, 0}, size.x * 1.1f, 0.2f, size.z * 1.1f, ColorAlpha(RED, 0.3f));
+    DrawCubeWires({0, 0, 0}, size.x * 1.1f, 0.2f, size.z * 1.1f, RED);
+    rlPopMatrix();
+    
+    // 绘制payload到目标的连线（保持原有逻辑）
     if (!task_completed_) {
         Vector3 start = {x, 0.5f, y};
         Vector3 end = {static_cast<float>(target_position_.x()), 0.5f, static_cast<float>(target_position_.y())};
         DrawLine3D(start, end, ColorAlpha(RED, 0.5f));
+    }
+    
+    // 新增：绘制目标朝向指示箭头
+    if (std::abs(getRotationError()) > 0.01) {
+        double target_angle = getRotationFromQuaternion(target_orientation_);
+        Vector3 target_center = {static_cast<float>(target_position_.x()), 0.3f, static_cast<float>(target_position_.y())};
+        
+        // 箭头长度为payload宽度的一半
+        float arrow_length = std::max(width_, height_) * 0.5f;
+        Vector3 arrow_end = {
+            target_center.x + arrow_length * cos(target_angle),
+            target_center.y,
+            target_center.z + arrow_length * sin(target_angle)
+        };
+        
+        // 绘制朝向箭头
+        DrawLine3D(target_center, arrow_end, ORANGE);
+        DrawSphere(arrow_end, 0.8f, ORANGE);  // 箭头头部
+        
+        // 可选：绘制朝向标识文字
+        // DrawText3D(font, "TARGET", arrow_end, 1.0f, 1.0f, false, WHITE);
+    }
+    
+    // 新增：绘制当前朝向指示箭头（用于对比）
+    {
+        Vector3 current_center = {x, 0.7f, y};  // 稍微高一点避免重叠
+        
+        float arrow_length = std::max(width_, height_) * 0.4f;
+        Vector3 current_arrow_end = {
+            current_center.x + arrow_length * cos(rotation_),
+            current_center.y,
+            current_center.z + arrow_length * sin(rotation_)
+        };
+        
+        // 绘制当前朝向箭头（绿色）
+        DrawLine3D(current_center, current_arrow_end, GREEN);
+        DrawSphere(current_arrow_end, 0.6f, GREEN);  // 箭头头部
     }
 }
 
@@ -139,6 +207,20 @@ Eigen::Quaterniond Payload::getRotation() const{
     return current_orientation_;
 }
 
+// 修改getRotationError方法使用正确的目标朝向
+double Payload::getRotationError() const {
+    if (target_orientation_.coeffs().norm() < 0.1) {
+        return 0.0;  // 如果目标朝向无效，返回0
+    }
+    
+    Eigen::Quaterniond relative_rotation = target_orientation_ * current_orientation_.inverse();
+    double rotation_error = 2.0 * std::acos(std::abs(relative_rotation.w()));
+    double rotation_direction = (relative_rotation.z() >= 0) ? 1.0 : -1.0;
+    double signed_rotation_error = rotation_direction * rotation_error;
+    
+    return signed_rotation_error;
+}
+
 Eigen::Vector2d Payload::getVelocity() const {
     if(physicsBody_) {
         b2Vec2 vel = physicsBody_->GetLinearVelocity();
@@ -153,9 +235,9 @@ std::pair<std::vector<Eigen::Vector2d>, std::vector<Eigen::Vector2d>> Payload::g
     
     if (!physicsBody_) return {points, normals};
     
-    // 直接使用payload的几何信息，不依赖Box2D的顶点顺序
+    // 直接使用rotation_而不是从四元数计算
     Eigen::Vector2d center = position_;
-    double rotation = getRotationFromQuaternion(current_orientation_);
+    double rotation = rotation_;  // 直接使用，已经在update()中更新
     
     // 旋转矩阵
     Eigen::Matrix2d rot;
@@ -188,7 +270,12 @@ std::pair<std::vector<Eigen::Vector2d>, std::vector<Eigen::Vector2d>> Payload::g
 }
 
 // 辅助函数：从四元数提取2D旋转角度
+// 如果需要在其他地方使用四元数，确保getRotationFromQuaternion正确实现
 double Payload::getRotationFromQuaternion(const Eigen::Quaterniond& q) const {
-    return atan2(2.0 * (q.w() * q.z() + q.x() * q.y()), 
-                 1.0 - 2.0 * (q.y() * q.y() + q.z() * q.z()));
+    // 确保四元数已经归一化
+    Eigen::Quaterniond normalized_q = q.normalized();
+    
+    // 从四元数提取Z轴旋转角度（2D旋转）
+    return atan2(2.0 * (normalized_q.w() * normalized_q.z() + normalized_q.x() * normalized_q.y()), 
+                 1.0 - 2.0 * (normalized_q.y() * normalized_q.y() + normalized_q.z() * normalized_q.z()));
 }

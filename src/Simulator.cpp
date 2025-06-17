@@ -45,8 +45,24 @@ void Simulator::createPayload(Eigen::Vector2d position, float width, float heigh
     auto payload = std::make_shared<Payload>(this, next_payload_id_++, position, width, height, globals.PAYLOAD_DENSITY);
     payloads_[payload->payload_id_] = payload;
     
-    // set target location
-    payload->setTarget(Eigen::Vector2d(globals.TARGET_X, globals.TARGET_Y));
+    // 计算绝对目标位置（基于相对位置）
+    Eigen::Vector2d absolute_target_position = position + Eigen::Vector2d(globals.TARGET_RELATIVE_X, globals.TARGET_RELATIVE_Y);
+    
+    // 设置目标位置
+    payload->setTarget(absolute_target_position);
+    
+    // 设置目标朝向（如果payload支持）
+    // 关键修复：使用相对旋转设置目标朝向
+    if (std::abs(globals.TARGET_RELATIVE_ROTATION) > 0.001) {  // 如果有旋转目标
+        payload->setTargetFromRelativeRotation(globals.TARGET_RELATIVE_ROTATION);
+        
+        std::cout << "Payload target: position(" << absolute_target_position.x() << ", " << absolute_target_position.y() 
+                  << ") relative_rotation(" << globals.TARGET_RELATIVE_ROTATION << " rad)" << std::endl;
+    } else {
+        // 如果没有旋转目标，目标朝向等于初始朝向
+        payload->target_orientation_ = payload->initial_orientation_;
+        std::cout << "Payload target: position only, no rotation" << std::endl;
+    }
 }
 
 /*******************************************************************************/
@@ -317,40 +333,114 @@ void Simulator::applyForcesToPayload(std::shared_ptr<Payload> payload,
     }
 }
 
+
+void Simulator::applyDirectPayloadVelocityControl() {
+    for (auto& [pid, payload] : payloads_) {
+        if (!payload->physicsBody_) continue;
+        
+        // 计算期望的线速度和角速度
+        Eigen::Vector2d desired_velocity = computeDesiredPayloadVelocity(payload);
+        double desired_angular_velocity = computeDesiredPayloadAngularVelocity(payload);
+        
+        // 直接设置payload的速度（Box2D提供的功能）
+        b2Vec2 new_linear_velocity(desired_velocity.x(), desired_velocity.y());
+        payload->physicsBody_->SetLinearVelocity(new_linear_velocity);
+        payload->physicsBody_->SetAngularVelocity(desired_angular_velocity);
+        
+        // 调试输出
+        static int debug_counter = 0;
+        if (debug_counter++ % 60 == 0) {  // 每60帧输出一次
+            b2Vec2 current_velocity = payload->physicsBody_->GetLinearVelocity();
+            double current_angular_velocity = payload->physicsBody_->GetAngularVelocity();
+            
+            std::cout << "Direct velocity control - Set vel: (" << desired_velocity.x() << ", " << desired_velocity.y() 
+                      << "), Actual vel: (" << current_velocity.x << ", " << current_velocity.y << ")" << std::endl;
+            std::cout << "Angular - Set: " << desired_angular_velocity 
+                      << ", Actual: " << current_angular_velocity << std::endl;
+        }
+    }
+}
+
+Eigen::Vector2d Simulator::computeDesiredPayloadVelocity(std::shared_ptr<Payload> payload) {
+    // 与PayloadVelocityFactor::computeDesiredPayloadMotion()保持一致的线速度计算
+    Eigen::Vector2d payload_to_target = payload->target_position_ - payload->position_;
+    
+    if (payload_to_target.norm() <= 0.1) {
+        return Eigen::Vector2d::Zero();  // 与factor中的阈值保持一致
+    }
+    
+    // 完全复制factor中的逻辑
+    Eigen::Vector2d desired_velocity = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
+    
+    return desired_velocity;
+}
+
+double Simulator::computeDesiredPayloadAngularVelocity(std::shared_ptr<Payload> payload) {
+    // 与PayloadVelocityFactor::computeDesiredPayloadMotion()保持一致的角速度计算
+    double rotation_error = payload->getRotationError();
+    
+    if (std::abs(rotation_error) <= 0.01) {  // 与factor中的阈值保持一致
+        return 0.0;
+    }
+    
+    // 完全复制factor中的逻辑
+    double desired_angular_velocity = std::copysign(1.0, rotation_error) * 
+        std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), std::abs(rotation_error));
+    
+    // 添加相同的调试输出
+    static int debug_counter = 0;
+    if (debug_counter++ % 60 == 0) {
+        std::cout << "Direct control - Rotation error: " << rotation_error 
+                  << " rad, desired angular vel: " << desired_angular_velocity << std::endl;
+    }
+    
+    return desired_angular_velocity;
+}
+
+
 // 修改timestep方法
 void Simulator::timestep() {
     if (globals.SIM_MODE != Timestep) return;
     
     // 根据配置选择控制方法
-    if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
-
+    if (globals.USE_DIRECT_PAYLOAD_VELOCITY) {
+        // 直接速度控制模式
+        applyDirectPayloadVelocityControl();
+        std::cout << "Using direct payload velocity control" << std::endl;
+    } else if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
+        // 分布式GBP控制模式
         updateDistributedPayloadControl();
+        std::cout << "Using distributed GBP control" << std::endl;
     } else {
-        computeLeastSquares(); // 保持原有的集中式控制
+        // 原有的集中式最小二乘控制
+        computeLeastSquares();
+        std::cout << "Using centralized least squares control" << std::endl;
     }
     
     calculateRobotNeighbours(robots_);
     
-    // 更新因子
-    for (auto [r_id, robot] : robots_) {
-        if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
+    // 更新因子（只在GBP模式下需要）
+    if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
+        for (auto [r_id, robot] : robots_) {
             robot->updatePayloadFactors(payloads_);
+            robot->updateInterrobotFactors();
         }
-        robot->updateInterrobotFactors();
     }
     
     setCommsFailure(globals.COMMS_FAILURE_RATE);
     
-    // GBP迭代
-    for (int i = 0; i < globals.NUM_ITERS; i++) {
-        iterateGBP(1, INTERNAL, robots_);
-        iterateGBP(1, EXTERNAL, robots_);
-    }
-    
-    // 更新状态
-    for (auto [r_id, robot] : robots_) {
-        robot->updateHorizon();
-        robot->updateCurrent();
+    // GBP迭代（只在GBP模式下需要）
+    if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
+        for (int i = 0; i < globals.NUM_ITERS; i++) {
+            iterateGBP(1, INTERNAL, robots_);
+            iterateGBP(1, EXTERNAL, robots_);
+        }
+        
+        // 更新机器人状态
+        for (auto [r_id, robot] : robots_) {
+            robot->updateHorizon();
+            robot->updateCurrent();
+        }
     }
     
     // 物理世界更新
@@ -379,10 +469,10 @@ void Simulator::updateDistributedPayloadControl() {
             }
         }
         
-        if (connected_robots > 0) {
-            std::cout << "Payload " << pid << " has " << connected_robots 
-                      << " robots connected via factors" << std::endl;
-        }
+        // if (connected_robots > 0) {
+        //     std::cout << "Payload " << pid << " has " << connected_robots 
+        //               << " robots connected via factors" << std::endl;
+        // }
     }
 }
 
@@ -532,9 +622,9 @@ void Simulator::createOrDeleteRobots(){
         float robot_radius = globals.ROBOT_RADIUS;
         
         // 获取payload信息
-        if (payloads_.empty()) return; // 如果没有payload，直接返回
+        if (payloads_.empty()) return;
         
-        auto payload = payloads_.begin()->second; // 获取第一个payload
+        auto payload = payloads_.begin()->second;
         auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
         
         if (contact_points.empty()) {
@@ -544,37 +634,33 @@ void Simulator::createOrDeleteRobots(){
         
         // 为每个机器人分配一个接触点索引
         for (int i = 0; i < globals.NUM_ROBOTS; i++) {
-            int contact_point_index = i % contact_points.size(); // 循环分配接触点
+            int contact_point_index = i % contact_points.size();
             
             // 获取对应的接触点和法向量
             Eigen::Vector2d contact_point = contact_points[contact_point_index];
             Eigen::Vector2d contact_normal = contact_normals[contact_point_index];
             
             // 机器人初始位置：接触点 - 机器人半径 * 法向量
-            // 这样确保机器人刚好接触payload
             Eigen::Vector2d robot_start_pos = contact_point - robot_radius * contact_normal;
             
             Eigen::VectorXd starting(4);
             starting << robot_start_pos.x(), robot_start_pos.y(), 0.0, 0.0;
             
-            Eigen::VectorXd ending = starting; // 初始目标就是起始位置
+            Eigen::VectorXd ending = starting;
             
             std::deque<Eigen::VectorXd> waypoints{starting, ending};
             
-            // 根据接触点索引设置颜色
             Color robot_color = ColorFromHSV(contact_point_index * 360.0f / contact_points.size(), 1.0f, 0.75f);
             
             auto robot = std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld());
             
-            // 关键：在创建时就分配接触点索引
+            // 分配接触点索引
             robot->assigned_contact_point_index_ = contact_point_index;
             
             robots_to_create.push_back(robot);
             
-            // 调试输出
             std::cout << "Robot " << robot->rid_ << " assigned to contact point " << contact_point_index 
-                      << " at position (" << contact_point.x() << ", " << contact_point.y() << ")" 
-                      << " with start position (" << robot_start_pos.x() << ", " << robot_start_pos.y() << ")" << std::endl;
+                      << " at position (" << contact_point.x() << ", " << contact_point.y() << ")" << std::endl;
         }
         
     } else if (globals.FORMATION=="junction"){
@@ -642,14 +728,41 @@ void Simulator::createOrDeleteRobots(){
         print("Shouldn't reach here, formation not defined!");
         // Define new formations here!
     }        
-    // Create and/or delete the robots as necessary.
+    
+    // Create robots first
     for (auto robot : robots_to_create){
         robot_positions_[robot->rid_] = std::vector<double>{robot->waypoints_[0](0), robot->waypoints_[0](1)};
         robots_[robot->rid_] = robot;
-    };
+    }
+    
+    // 关键修改：可切换的刚性连接
+    if (globals.FORMATION == "Payload" && !payloads_.empty()) {
+        auto payload = payloads_.begin()->second;
+        auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
+        
+        if (globals.USE_RIGID_ATTACHMENT) {
+            // 启用刚性连接
+            for (auto robot : robots_to_create) {
+                int contact_index = robot->assigned_contact_point_index_;
+                if (contact_index < contact_points.size()) {
+                    Eigen::Vector2d attach_point = contact_points[contact_index];
+                    robot->attachToPayload(payload, attach_point);
+                    std::cout << "Robot " << robot->rid_ << " attached to payload via Box2D joint (rigid attachment enabled)" << std::endl;
+                }
+            }
+        } else {
+            // 禁用刚性连接，使用纯因子图控制
+            std::cout << "Rigid attachment disabled - robots will rely purely on factor-based control" << std::endl;
+            for (auto robot : robots_to_create) {
+                std::cout << "Robot " << robot->rid_ << " will use factor-based control only" << std::endl;
+            }
+        }
+    }
+    
+    // Delete robots
     for (auto robot : robots_to_delete){
         deleteRobot(robot);
-    };
+    }
 }
 
 /*******************************************************************************/
