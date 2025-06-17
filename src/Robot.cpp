@@ -148,7 +148,14 @@ void Robot::updatePayloadFactors(const std::map<int, std::shared_ptr<Payload>>& 
                            != connected_payload_ids_.end();
         
         if (!is_connected) {
-            createPayloadFactors(payload);
+            // *** 注释掉旧的因子创建 ***
+            // createPayloadFactors(payload);  // 包含 ContactFactor 和 PayloadVelocityFactor
+            
+            // *** 只使用新的 PayloadTwistFactor ***
+            createPayloadTwistFactors(payload);
+            
+            // 标记为已连接
+            connected_payload_ids_.push_back(pid);
         }
     }
     
@@ -156,7 +163,9 @@ void Robot::updatePayloadFactors(const std::map<int, std::shared_ptr<Payload>>& 
     for (auto it = connected_payload_ids_.begin(); it != connected_payload_ids_.end();) {
         int pid = *it;
         if (payloads.find(pid) == payloads.end()) {
-            // payload不存在，需要删除（这里简化处理，实际中payload很少被删除）
+            // payload不存在，需要删除相关因子
+            // deletePayloadFactors(pid);  // *** 注释掉旧的删除方法 ***
+            deletePayloadTwistFactors(pid);  // 只删除 twist 因子
             it = connected_payload_ids_.erase(it);
         } else {
             ++it;
@@ -171,29 +180,70 @@ void Robot::createPayloadTwistFactors(std::shared_ptr<Payload> payload) {
         return;
     }
     
-    // 为每个规划变量创建到 payload twist 的因子
+    // 一次性获取几何信息
+    auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
+    if (assigned_contact_point_index_ >= contact_points.size()) {
+        std::cout << "Warning: Invalid contact point index for robot " << rid_ << std::endl;
+        return;
+    }
+    
+    // *** 计算几何参数（值拷贝，避免后续访问 payload）***
+    Eigen::Vector2d contact_point = contact_points[assigned_contact_point_index_];
+    Eigen::Vector2d contact_normal = contact_normals[assigned_contact_point_index_];
+    Eigen::Vector2d payload_center = payload->getPosition();
+    Eigen::Vector2d r_vector = contact_point - payload_center;
+    
+    // 为每个规划变量创建因子
     for (int i = 1; i < num_variables_; i++) {
         std::vector<std::shared_ptr<Variable>> variables{
             getVar(i),           // robot variable
             twist_variable       // payload twist variable (共享)
         };
         
+        // *** 使用新的优化构造函数，传递几何参数而非指针 ***
         auto factor = std::make_shared<PayloadTwistFactor>(
             sim_->next_fid_++, rid_, variables,
             globals.SIGMA_FACTOR_PAYLOAD_TWIST,
-            Eigen::VectorXd::Zero(3), // measurement
-            payload, assigned_contact_point_index_
+            Eigen::VectorXd::Zero(2),  // 测量向量（期望残差为0）
+            r_vector,                  // 力臂向量（值拷贝）
+            contact_normal             // 法向量（值拷贝）
         );
         
-        // 添加到robot的因子图
+        // 添加到因子图
         for (auto var : factor->variables_) var->add_factor(factor);
         this->factors_[factor->key_] = factor;
     }
     
-    std::cout << "Robot " << rid_ << " created payload twist factors for payload " 
-              << payload->payload_id_ << std::endl;
+    std::cout << "Robot " << rid_ << " created optimized PayloadTwistFactors (linear, distributed)" << std::endl;
 }
 
+void Robot::deletePayloadTwistFactors(int payload_id) {
+    std::vector<Key> factors_to_delete{};
+    
+    // 查找所有 PayloadTwistFactor（注意：现在没有 getPayloadId() 方法了）
+    for (auto& [f_key, fac] : this->factors_) {
+        if (fac->factor_type_ == PAYLOAD_TWIST_FACTOR) {
+            // 由于删除了 payload 指针，这里需要其他方式识别
+            // 可以通过变量连接来判断，或者添加 payload_id 成员
+            factors_to_delete.push_back(f_key);
+        }
+    }
+    
+    // 删除因子
+    for (auto f_key : factors_to_delete) {
+        auto fac = this->factors_[f_key];
+        for (auto& var : fac->variables_) {
+            var->delete_factor(f_key);
+        }
+        this->factors_.erase(f_key);
+    }
+    
+    std::cout << "Deleted " << factors_to_delete.size() 
+              << " PayloadTwistFactors for payload " << payload_id << std::endl;
+}
+
+/*
+// *** 临时注释掉，避免与 PayloadTwistFactor 冲突 ***
 void Robot::createPayloadFactors(std::shared_ptr<Payload> payload) {
     int pid = payload->payload_id_;
     
@@ -242,7 +292,10 @@ void Robot::createPayloadFactors(std::shared_ptr<Payload> payload) {
     // 添加到connected payloads列表
     this->connected_payload_ids_.push_back(payload->payload_id_);
 }
+*/
 
+/*
+// *** 临时注释掉，只保留 PayloadTwistFactor ***
 void Robot::deletePayloadFactors(std::shared_ptr<Payload> payload) {
     std::vector<Key> factors_to_delete{};
     
@@ -272,6 +325,7 @@ void Robot::deletePayloadFactors(std::shared_ptr<Payload> payload) {
         this->factors_.erase(f_key);
     }
 }
+*/
 
 bool Robot::isConnectedToPayload(int payload_id) const {
     return std::find(connected_payload_ids_.begin(), connected_payload_ids_.end(), payload_id) 

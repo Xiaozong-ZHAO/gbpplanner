@@ -60,8 +60,8 @@ public:
 
     // 简化后的payload相关方法
     void updatePayloadFactors(const std::map<int, std::shared_ptr<Payload>>& payloads);
-    void createPayloadFactors(std::shared_ptr<Payload> payload);
-    void deletePayloadFactors(std::shared_ptr<Payload> payload);
+    // void createPayloadFactors(std::shared_ptr<Payload> payload);
+    // void deletePayloadFactors(std::shared_ptr<Payload> payload);
     
     // 查询方法
     bool isConnectedToPayload(int payload_id) const;

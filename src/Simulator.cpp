@@ -398,34 +398,41 @@ double Simulator::computeDesiredPayloadAngularVelocity(std::shared_ptr<Payload> 
 }
 
 
-// 修改timestep方法
 void Simulator::timestep() {
     if (globals.SIM_MODE != Timestep) return;
     
     // 根据配置选择控制方法
     if (globals.USE_DIRECT_PAYLOAD_VELOCITY) {
+        // 直接速度控制模式
         applyDirectPayloadVelocityControl();
+        std::cout << "Using direct payload velocity control" << std::endl;
     } else if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
+        // 分布式GBP控制模式 - 现在只使用 PayloadTwistFactor
         updateDistributedPayloadControl();
+        std::cout << "Using distributed GBP control (PayloadTwistFactor only)" << std::endl;
     } else {
+        // 原有的集中式最小二乘控制
         computeLeastSquares();
+        std::cout << "Using centralized least squares control" << std::endl;
     }
     
     calculateRobotNeighbours(robots_);
     
-    // *** 关键：更新所有因子，包括新的 PayloadTwistFactor ***
-    for (auto [r_id, robot] : robots_) {
-        robot->updatePayloadFactors(payloads_);  // 这里会调用 createPayloadTwistFactors
-        robot->updateInterrobotFactors();
+    // 更新因子（现在只创建 PayloadTwistFactor）
+    if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
+        for (auto [r_id, robot] : robots_) {
+            robot->updatePayloadFactors(payloads_);  // 只创建 PayloadTwistFactor
+            robot->updateInterrobotFactors();
+        }
     }
     
     setCommsFailure(globals.COMMS_FAILURE_RATE);
     
-    // GBP迭代（PayloadTwistFactor 会自动参与）
+    // GBP迭代（只有 PayloadTwistFactor 参与）
     if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
         for (int i = 0; i < globals.NUM_ITERS; i++) {
-            iterateGBP(1, INTERNAL, robots_);   // 包含 PayloadTwistFactor 的迭代
-            iterateGBP(1, EXTERNAL, robots_);   // 机器人间通信
+            iterateGBP(1, INTERNAL, robots_);
+            iterateGBP(1, EXTERNAL, robots_);
         }
         
         // 更新机器人状态
@@ -795,7 +802,9 @@ void Simulator::createOrDeleteRobots(){
             }
         }
         
-        // 2.3 为每个新机器人创建传统的 payload 因子（接触和速度因子）
+        // *** 2.3 注释掉传统payload因子的创建，避免与PayloadTwistFactor冲突 ***
+        /*
+        // 为每个新机器人创建传统的 payload 因子（接触和速度因子）
         if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
             std::cout << "Creating traditional payload factors (contact & velocity)..." << std::endl;
             for (auto robot : robots_to_create) {
@@ -804,6 +813,9 @@ void Simulator::createOrDeleteRobots(){
                 }
             }
         }
+        */
+        std::cout << "*** Traditional payload factors (ContactFactor & PayloadVelocityFactor) are temporarily disabled ***" << std::endl;
+        std::cout << "*** Only using PayloadTwistFactor for distributed control ***" << std::endl;
     }
     
     // ========== 机器人删除流程 ==========
@@ -825,6 +837,7 @@ void Simulator::createOrDeleteRobots(){
         std::cout << "- Rigid attachment: " << (globals.USE_RIGID_ATTACHMENT ? "enabled" : "disabled") << std::endl;
         std::cout << "- Distributed control: " << (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL ? "enabled" : "disabled") << std::endl;
         std::cout << "- Direct velocity control: " << (globals.USE_DIRECT_PAYLOAD_VELOCITY ? "enabled" : "disabled") << std::endl;
+        std::cout << "- Active factors: PayloadTwistFactor only (traditional factors disabled)" << std::endl;
     }
 }
 

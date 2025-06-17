@@ -17,8 +17,8 @@ enum MODES_LIST {SimNone, Timestep, Iterate, Help};
 /***********************************************************************************************/
 class Globals {
     public:
-    float SIGMA_FACTOR_CONTACT;           // 接触保持因子强度
-    float SIGMA_FACTOR_PAYLOAD_VELOCITY;  // 速度对齐因子强度
+    // float SIGMA_FACTOR_CONTACT;           // 接触保持因子强度
+    // float SIGMA_FACTOR_PAYLOAD_VELOCITY;  // 速度对齐因子强度
     bool USE_DISTRIBUTED_PAYLOAD_CONTROL; // 是否使用分布式控制
     float CONTACT_ASSIGNMENT_RADIUS;      // 接触点分配半径
 
