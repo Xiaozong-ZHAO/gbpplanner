@@ -164,6 +164,36 @@ void Robot::updatePayloadFactors(const std::map<int, std::shared_ptr<Payload>>& 
     }
 }
 
+void Robot::createPayloadTwistFactors(std::shared_ptr<Payload> payload) {
+    auto twist_variable = sim_->getPayloadTwistVariable(payload->payload_id_);
+    if (!twist_variable) {
+        std::cout << "Warning: No twist variable found for payload " << payload->payload_id_ << std::endl;
+        return;
+    }
+    
+    // 为每个规划变量创建到 payload twist 的因子
+    for (int i = 1; i < num_variables_; i++) {
+        std::vector<std::shared_ptr<Variable>> variables{
+            getVar(i),           // robot variable
+            twist_variable       // payload twist variable (共享)
+        };
+        
+        auto factor = std::make_shared<PayloadTwistFactor>(
+            sim_->next_fid_++, rid_, variables,
+            globals.SIGMA_FACTOR_PAYLOAD_TWIST,
+            Eigen::VectorXd::Zero(3), // measurement
+            payload, assigned_contact_point_index_
+        );
+        
+        // 添加到robot的因子图
+        for (auto var : factor->variables_) var->add_factor(factor);
+        this->factors_[factor->key_] = factor;
+    }
+    
+    std::cout << "Robot " << rid_ << " created payload twist factors for payload " 
+              << payload->payload_id_ << std::endl;
+}
+
 void Robot::createPayloadFactors(std::shared_ptr<Payload> payload) {
     int pid = payload->payload_id_;
     
@@ -421,7 +451,8 @@ void Robot::deleteInterrobotFactors(std::shared_ptr<Robot> other_robot)
 /***************************************************************************************************/
 void Robot::draw(){
     Color col = (interrobot_comms_active_) ? color_ : GRAY;
-    // Draw planned path
+    
+    // 现有绘制代码保持不变...
     if (globals.DRAW_PATH){
         static int debug = 0;
         for (auto [vid, variable] : variables_){
@@ -429,8 +460,9 @@ void Robot::draw(){
             DrawSphere(Vector3{(float)variable->mu_(0), height_3D_, (float)variable->mu_(1)}, 0.5*robot_radius_, ColorAlpha(col, 0.5));
         }
         for (auto [fid, factor] : factors_) factor->draw();
-    }     
-    // Draw connected robots
+    }
+    
+    // 现有连接线绘制...
     if (globals.DRAW_INTERROBOT){
         for (auto rid : connected_r_ids_){
             if (!interrobot_comms_active_ || !sim_->robots_.at(rid)->interrobot_comms_active_) continue;
@@ -440,15 +472,121 @@ void Robot::draw(){
         }
     }
 
-    // Draw the waypoints of the robot
+    // 现有waypoints绘制...
     if (globals.DRAW_WAYPOINTS){
         for (int wp_idx=0; wp_idx<waypoints_.size(); wp_idx++){
             DrawCubeV(Vector3{(float)waypoints_[wp_idx](0), height_3D_, (float)waypoints_[wp_idx](1)}, Vector3{1.f*robot_radius_,1.f*robot_radius_,1.f*robot_radius_}, col);
         }
     }
-    // Draw the actual position of the robot. This uses the robotModel defined in Graphics.cpp, others can be used.
+    
+    // 新增：绘制速度向量
+    if (globals.DRAW_ROBOT_VELOCITIES) {
+        drawVelocityVector();
+    }
+    
+    // 现有机器人模型绘制...
     DrawModel(sim_->graphics->robotModel_, Vector3{(float)position_(0), height_3D_, (float)position_(1)}, robot_radius_, col);
-};
+}
+
+void Robot::drawVelocityVector() {
+    // 获取当前速度和期望速度
+    Eigen::Vector2d current_velocity = getCurrentVelocity();
+    Eigen::Vector2d desired_velocity = getDesiredVelocity();
+    
+    Vector3 robot_pos = {(float)position_(0), height_3D_ + 1.0f, (float)position_(1)};
+    
+    // 速度缩放因子（调整箭头长度）
+    float velocity_scale = 5.0f;
+    float min_velocity_threshold = 0.01f; // 最小速度阈值，避免绘制过小的向量
+    
+    // 绘制当前速度向量（绿色）
+    if (current_velocity.norm() > min_velocity_threshold) {
+        Vector3 current_vel_end = {
+            robot_pos.x + current_velocity.x() * velocity_scale,
+            robot_pos.y,
+            robot_pos.z + current_velocity.y() * velocity_scale
+        };
+        
+        // 绘制速度箭头
+        DrawLine3D(robot_pos, current_vel_end, GREEN);
+        DrawSphere(current_vel_end, 0.3f, GREEN);
+        
+        // 可选：绘制速度数值文本
+        char vel_text[64];
+        sprintf(vel_text, "%.2f", current_velocity.norm());
+        Vector3 text_pos = {current_vel_end.x, current_vel_end.y + 0.5f, current_vel_end.z};
+        // DrawText3D(font, vel_text, text_pos, 1.0f, 1.0f, false, GREEN); // 需要font支持
+    }
+    
+    // 绘制期望速度向量（蓝色）
+    if (desired_velocity.norm() > min_velocity_threshold) {
+        Vector3 desired_vel_end = {
+            robot_pos.x + desired_velocity.x() * velocity_scale,
+            robot_pos.y + 0.2f, // 稍微偏移避免重叠
+            robot_pos.z + desired_velocity.y() * velocity_scale
+        };
+        
+        // 绘制期望速度箭头
+        DrawLine3D(robot_pos, desired_vel_end, BLUE);
+        DrawSphere(desired_vel_end, 0.25f, BLUE);
+    }
+    
+    // 绘制速度误差向量（红色）
+    Eigen::Vector2d velocity_error = desired_velocity - current_velocity;
+    if (velocity_error.norm() > min_velocity_threshold) {
+        Vector3 error_end = {
+            robot_pos.x + velocity_error.x() * velocity_scale,
+            robot_pos.y - 0.2f, // 向下偏移
+            robot_pos.z + velocity_error.y() * velocity_scale
+        };
+        
+        DrawLine3D(robot_pos, error_end, RED);
+        DrawSphere(error_end, 0.2f, RED);
+    }
+}
+
+Eigen::Vector2d Robot::getCurrentVelocity() const {
+    // 从物理引擎获取当前速度
+    if (physicsBody_) {
+        b2Vec2 vel = physicsBody_->GetLinearVelocity();
+        return Eigen::Vector2d(vel.x, vel.y);
+    }
+    
+    // 如果没有物理体，从规划路径中估算
+    if (variables_.size() >= 2) {
+        auto current_var = getVar(0);
+        auto next_var = getVar(1);
+        if (current_var && next_var && current_var->valid_ && next_var->valid_) {
+            Eigen::Vector2d pos_diff = next_var->mu_.head(2) - current_var->mu_.head(2);
+            return pos_diff / globals.T0; // T0是时间步长
+        }
+    }
+    
+    return Eigen::Vector2d::Zero();
+}
+
+Eigen::Vector2d Robot::getDesiredVelocity() const {
+    // 从规划路径获取期望速度
+    if (variables_.size() >= 1) {
+        auto current_var = getVar(0);
+        if (current_var && current_var->valid_ && current_var->mu_.size() >= 4) {
+            return current_var->mu_.tail(2); // 假设mu_是[x, y, vx, vy]格式
+        }
+    }
+    
+    // 备选方案：简单计算朝向下一个waypoint的速度
+    if (waypoints_.size() > 0) {
+        Eigen::Vector2d target = waypoints_[0].head(2);
+        Eigen::Vector2d current = position_.head(2);
+        Eigen::Vector2d direction = target - current;
+        
+        if (direction.norm() > 0.1) {
+            return direction.normalized() * globals.MAX_SPEED;
+        }
+    }
+    
+    return Eigen::Vector2d::Zero();
+}
 
 /*******************************************************************************************/
 // Function for determining the timesteps at which variables in the planned path are placed.

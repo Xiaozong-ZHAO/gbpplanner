@@ -20,7 +20,7 @@ using Eigen::last;
 class Variable;     // Forward declaration
 
 // Types of factors defined. Default is DEFAULT_FACTOR
-enum FactorType {DEFAULT_FACTOR, DYNAMICS_FACTOR, INTERROBOT_FACTOR, OBSTACLE_FACTOR, CONTACT_FACTOR, PAYLOAD_VELOCITY_FACTOR};
+enum FactorType {DEFAULT_FACTOR, DYNAMICS_FACTOR, INTERROBOT_FACTOR, OBSTACLE_FACTOR, CONTACT_FACTOR, PAYLOAD_VELOCITY_FACTOR, PAYLOAD_TWIST_FACTOR};
 /*****************************************************************************************/
 // Factor used in GBP
 /*****************************************************************************************/
@@ -79,6 +79,31 @@ class Factor {
 // You may create a new factor_type_, in the enum in Factor.h (optional, default type is DEFAULT_FACTOR)
 // Create a measurement function h_func_() and optionally Jacobian J_func_().
 
+
+class PayloadTwistFactor : public Factor {
+private:
+    std::shared_ptr<Payload> payload_;
+    int contact_point_index_;
+    
+public:
+    PayloadTwistFactor(int f_id, int r_id, 
+                       std::vector<std::shared_ptr<Variable>> variables,
+                       float sigma, const Eigen::VectorXd& measurement,
+                       std::shared_ptr<Payload> payload,
+                       int contact_point_index);
+    
+    // 重写的虚函数声明
+    Eigen::MatrixXd h_func_(const Eigen::VectorXd& X) override;
+    int getPayloadId() const {
+        return payload_ ? payload_->payload_id_ : -1;
+    }
+    
+private:
+    // 私有方法声明
+    std::pair<Eigen::Vector2d, double> computeDesiredPayloadMotion();
+    std::pair<double, double> computeRobotContribution(
+        const Eigen::Vector2d& robot_pos, const Eigen::Vector2d& robot_vel);
+};
 
 class ContactFactor : public Factor {
 public:

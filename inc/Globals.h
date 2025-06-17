@@ -77,6 +77,8 @@ class Globals {
     float TARGET_RELATIVE_ROTATION;
     bool USE_RIGID_ATTACHMENT;
     bool USE_DIRECT_PAYLOAD_VELOCITY; // 是否使用直接速度控制
+    bool DRAW_ROBOT_VELOCITIES;
+    float SIGMA_FACTOR_PAYLOAD_TWIST;
     
     Globals();
     int parse_global_args(DArgs::DArgs& dargs);

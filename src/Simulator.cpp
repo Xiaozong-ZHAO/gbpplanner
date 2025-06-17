@@ -404,36 +404,28 @@ void Simulator::timestep() {
     
     // 根据配置选择控制方法
     if (globals.USE_DIRECT_PAYLOAD_VELOCITY) {
-        // 直接速度控制模式
         applyDirectPayloadVelocityControl();
-        std::cout << "Using direct payload velocity control" << std::endl;
     } else if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
-        // 分布式GBP控制模式
         updateDistributedPayloadControl();
-        std::cout << "Using distributed GBP control" << std::endl;
     } else {
-        // 原有的集中式最小二乘控制
         computeLeastSquares();
-        std::cout << "Using centralized least squares control" << std::endl;
     }
     
     calculateRobotNeighbours(robots_);
     
-    // 更新因子（只在GBP模式下需要）
-    if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
-        for (auto [r_id, robot] : robots_) {
-            robot->updatePayloadFactors(payloads_);
-            robot->updateInterrobotFactors();
-        }
+    // *** 关键：更新所有因子，包括新的 PayloadTwistFactor ***
+    for (auto [r_id, robot] : robots_) {
+        robot->updatePayloadFactors(payloads_);  // 这里会调用 createPayloadTwistFactors
+        robot->updateInterrobotFactors();
     }
     
     setCommsFailure(globals.COMMS_FAILURE_RATE);
     
-    // GBP迭代（只在GBP模式下需要）
+    // GBP迭代（PayloadTwistFactor 会自动参与）
     if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
         for (int i = 0; i < globals.NUM_ITERS; i++) {
-            iterateGBP(1, INTERNAL, robots_);
-            iterateGBP(1, EXTERNAL, robots_);
+            iterateGBP(1, INTERNAL, robots_);   // 包含 PayloadTwistFactor 的迭代
+            iterateGBP(1, EXTERNAL, robots_);   // 机器人间通信
         }
         
         // 更新机器人状态
@@ -517,6 +509,28 @@ void Simulator::setCommsFailure(float failure_rate){
     }
 }
 
+void Simulator::createPayloadTwistVariable(int payload_id) {
+    // 创建 payload twist 变量 [vx, vy, omega] (3 DOF)
+    Eigen::VectorXd initial_twist = Eigen::VectorXd::Zero(3);
+    Eigen::VectorXd sigma_list = Eigen::VectorXd::Constant(3, 1.0); // 初始不确定性
+    
+    auto twist_variable = std::make_shared<Variable>(
+        next_vid_++, 
+        -1, // 特殊robot id，表示这是共享变量
+        initial_twist, 
+        sigma_list, 
+        1.0f, // size for visualization
+        3   // n_dofs
+    );
+    
+    payload_twist_variables_[payload_id] = twist_variable;
+}
+
+std::shared_ptr<Variable> Simulator::getPayloadTwistVariable(int payload_id) {
+    auto it = payload_twist_variables_.find(payload_id);
+    return (it != payload_twist_variables_.end()) ? it->second : nullptr;
+}
+
 /*******************************************************************************/
 // Handles keypresses and mouse input, and updates camera.
 /*******************************************************************************/
@@ -592,7 +606,7 @@ void Simulator::createOrDeleteRobots(){
     Eigen::VectorXd starting, turning, ending; // Waypoints : [x,y,xdot,ydot].
 
     if (globals.FORMATION=="circle"){
-    // Robots must travel to opposite sides of circle
+        // Robots must travel to opposite sides of circle
         new_robots_needed_ = false;
         float min_circumference_spacing = 5.*globals.ROBOT_RADIUS;
         double min_radius = 0.25 * globals.WORLD_SZ;
@@ -624,6 +638,13 @@ void Simulator::createOrDeleteRobots(){
         // 获取payload信息
         if (payloads_.empty()) return;
         
+        // 1. 首先为所有payload创建 twist 变量
+        std::cout << "Creating payload twist variables..." << std::endl;
+        for (auto& [pid, payload] : payloads_) {
+            createPayloadTwistVariable(pid);
+            std::cout << "Created twist variable for payload " << pid << std::endl;
+        }
+        
         auto payload = payloads_.begin()->second;
         auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
         
@@ -632,7 +653,8 @@ void Simulator::createOrDeleteRobots(){
             return;
         }
         
-        // 为每个机器人分配一个接触点索引
+        // 2. 创建机器人
+        std::cout << "Creating robots for payload formation..." << std::endl;
         for (int i = 0; i < globals.NUM_ROBOTS; i++) {
             int contact_point_index = i % contact_points.size();
             
@@ -664,7 +686,7 @@ void Simulator::createOrDeleteRobots(){
         }
         
     } else if (globals.FORMATION=="junction"){
-    // Robots in a cross-roads style junction. There is only one-way traffic, and no turning.        
+        // Robots in a cross-roads style junction. There is only one-way traffic, and no turning.        
         new_robots_needed_ = true;      // This is needed so that more robots can be created as the simulation progresses.
         if (clock_%20==0){              // Arbitrary condition on the simulation time to create new robots
             int n_roads = 2;
@@ -693,7 +715,7 @@ void Simulator::createOrDeleteRobots(){
         }
 
     } else if (globals.FORMATION=="junction_twoway"){
-    // Robots in a two-way junction, turning LEFT (RED), RIGHT (BLUE) or STRAIGHT (GREEN)
+        // Robots in a two-way junction, turning LEFT (RED), RIGHT (BLUE) or STRAIGHT (GREEN)
         new_robots_needed_ = true;   // This is needed so that more robots can be created as the simulation progresses.
         if (clock_%20==0){           // Arbitrary condition on the simulation time to create new robots
             int n_roads = 4;
@@ -729,39 +751,80 @@ void Simulator::createOrDeleteRobots(){
         // Define new formations here!
     }        
     
-    // Create robots first
+    // ========== 通用机器人创建流程 ==========
+    // 1. 首先创建所有机器人并添加到系统中
+    std::cout << "Adding " << robots_to_create.size() << " robots to system..." << std::endl;
     for (auto robot : robots_to_create){
         robot_positions_[robot->rid_] = std::vector<double>{robot->waypoints_[0](0), robot->waypoints_[0](1)};
         robots_[robot->rid_] = robot;
+        std::cout << "Added robot " << robot->rid_ << " to system" << std::endl;
     }
     
-    // 关键修改：可切换的刚性连接
+    // 2. 针对 Payload formation 的特殊处理
     if (globals.FORMATION == "Payload" && !payloads_.empty()) {
+        std::cout << "Setting up payload-specific factors and connections..." << std::endl;
+        
         auto payload = payloads_.begin()->second;
         auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
         
+        // 2.1 为每个新创建的机器人建立 payload twist 因子连接
+        for (auto robot : robots_to_create) {
+            for (auto& [pid, payload] : payloads_) {
+                std::cout << "Creating payload twist factors for robot " << robot->rid_ 
+                          << " and payload " << pid << std::endl;
+                robot->createPayloadTwistFactors(payload);
+            }
+        }
+        
+        // 2.2 可选：设置刚性连接（如果启用）
         if (globals.USE_RIGID_ATTACHMENT) {
-            // 启用刚性连接
+            std::cout << "Setting up rigid attachments..." << std::endl;
             for (auto robot : robots_to_create) {
                 int contact_index = robot->assigned_contact_point_index_;
                 if (contact_index < contact_points.size()) {
                     Eigen::Vector2d attach_point = contact_points[contact_index];
                     robot->attachToPayload(payload, attach_point);
-                    std::cout << "Robot " << robot->rid_ << " attached to payload via Box2D joint (rigid attachment enabled)" << std::endl;
+                    std::cout << "Robot " << robot->rid_ 
+                              << " attached to payload via Box2D joint (rigid attachment enabled)" << std::endl;
                 }
             }
         } else {
-            // 禁用刚性连接，使用纯因子图控制
             std::cout << "Rigid attachment disabled - robots will rely purely on factor-based control" << std::endl;
             for (auto robot : robots_to_create) {
                 std::cout << "Robot " << robot->rid_ << " will use factor-based control only" << std::endl;
             }
         }
+        
+        // 2.3 为每个新机器人创建传统的 payload 因子（接触和速度因子）
+        if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
+            std::cout << "Creating traditional payload factors (contact & velocity)..." << std::endl;
+            for (auto robot : robots_to_create) {
+                for (auto& [pid, payload] : payloads_) {
+                    robot->updatePayloadFactors(payloads_);
+                }
+            }
+        }
     }
     
-    // Delete robots
+    // ========== 机器人删除流程 ==========
+    // 删除需要删除的机器人
+    std::cout << "Deleting " << robots_to_delete.size() << " robots..." << std::endl;
     for (auto robot : robots_to_delete){
+        std::cout << "Deleting robot " << robot->rid_ << std::endl;
         deleteRobot(robot);
+    }
+    
+    // ========== 状态总结 ==========
+    std::cout << "Robot creation/deletion completed. Current system state:" << std::endl;
+    std::cout << "- Total robots: " << robots_.size() << std::endl;
+    std::cout << "- Total payloads: " << payloads_.size() << std::endl;
+    std::cout << "- Formation: " << globals.FORMATION << std::endl;
+    
+    if (globals.FORMATION == "Payload") {
+        std::cout << "- Payload twist variables: " << payload_twist_variables_.size() << std::endl;
+        std::cout << "- Rigid attachment: " << (globals.USE_RIGID_ATTACHMENT ? "enabled" : "disabled") << std::endl;
+        std::cout << "- Distributed control: " << (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL ? "enabled" : "disabled") << std::endl;
+        std::cout << "- Direct velocity control: " << (globals.USE_DIRECT_PAYLOAD_VELOCITY ? "enabled" : "disabled") << std::endl;
     }
 }
 

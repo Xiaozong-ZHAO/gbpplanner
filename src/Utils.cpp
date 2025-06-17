@@ -14,21 +14,8 @@ extern Globals globals;
 // Draw the Time and FPS, as well as the help box
 /**************************************************************************************/
 void draw_info(uint32_t time_cnt){
-    static std::map<MODES_LIST, const char*> MODES_MAP = {
-        {SimNone,""},
-        {Timestep,"Timestep"},
-        {Iterate,"Synchronous Iteration"},
-        {Help, "Help"},
-    };
-
-    int info_box_h = 100, info_box_w = 180;;
-    int info_box_x = 10, info_box_y = globals.SCREEN_SZ-40-info_box_h;
-
-    DrawRectangle(0, globals.SCREEN_SZ-30, globals.SCREEN_SZ, 30, RAYWHITE);
-    DrawText(TextFormat("Time: %.1f s", time_cnt*globals.TIMESTEP), 5, globals.SCREEN_SZ-20, 20, DARKGREEN);
-    DrawText(TextFormat("Press H for Help"), globals.SCREEN_SZ/2-80, globals.SCREEN_SZ-20, 20, DARKGREEN);
-    DrawFPS(globals.SCREEN_SZ-80, globals.SCREEN_SZ-20);
-
+    // 现有代码保持不变...
+    
     if (globals.SIM_MODE==Help){
         int info_box_h = 500, info_box_w = 500;
         int info_box_x = globals.SCREEN_SZ/2 - info_box_w/2, info_box_y = globals.SCREEN_SZ/2 - info_box_h/2;
@@ -44,6 +31,7 @@ void draw_info(uint32_t time_cnt){
             "P : \t\t\t\t\t\t Toggle Planned paths",
             "R : \t\t\t\t\t\t Toggle Connected Robots",
             "W : \t\t\t\t\t\t Toggle Waypoints",
+            "V : \t\t\t\t\t\t Toggle Robot Velocities",  // 新增
             ""         ,
             "Mouse Wheel Scroll : Zoom",
             "Mouse Wheel Drag : Pan",

@@ -59,6 +59,7 @@ public:
     uint32_t clock_ = 0;                            // Simulation clock (timesteps)                   
     std::map<int, std::shared_ptr<Robot>> robots_;  // Map containing smart pointers to all robots, accessed by their rid.
     std::map<int, std::shared_ptr<Payload>> payloads_; // Map containing smart pointers to all payloads, accessed by their pid.
+    std::map<int, std::shared_ptr<Variable>> payload_twist_variables_;
     bool new_robots_needed_ = true;                 // Whether or not to create new robots. (Some formations are dynamicaly changing)
     bool symmetric_factors = false;                 // If true, when inter-robot factors need to be created between two robots,
                                                     // a pair of factors is created (one belonging to each robot). This becomes a redundancy.
@@ -84,6 +85,9 @@ public:
     // New formations must modify the vectors "robots to create" and optionally "robots_to_delete"
     // by appending (push_back()) a shared pointer to a Robot class.
     /*******************************************************************************/    
+    void createPayloadTwistVariable(int payload_id);
+    std::shared_ptr<Variable> getPayloadTwistVariable(int payload_id);
+    
     void assignContactPoints();
     void updateDistributedPayloadControl();
     // 辅助方法

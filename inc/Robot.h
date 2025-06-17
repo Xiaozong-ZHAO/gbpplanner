@@ -73,6 +73,15 @@ public:
     /****************************************/
     //Functions
     /****************************************/
+    // 新增：绘制速度向量的方法
+    void drawVelocityVector();
+    void createPayloadTwistFactors(std::shared_ptr<Payload> payload);
+    void deletePayloadTwistFactors(int payload_id);
+
+    
+    // 辅助方法
+    Eigen::Vector2d getCurrentVelocity() const;
+    Eigen::Vector2d getDesiredVelocity() const;
     void updateForPayload();
     void syncPhysicsToLogical();
     void syncLogicalToPhysics();

@@ -42,6 +42,12 @@ class FactorGraph {
         std::advance(it, search_vid);
         return it->second;
     }
+
+    const std::shared_ptr<Variable>& getVar(const int& i) const {
+    auto it = variables_.begin();
+    std::advance(it, i);
+    return it->second;
+    }
     
     // Access the variable by a specific key
     std::shared_ptr<Variable>& getVar(const Key& v_key){

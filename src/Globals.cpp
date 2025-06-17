@@ -63,7 +63,8 @@ void Globals::parse_global_args(std::ifstream& config_file){
     TARGET_RELATIVE_ROTATION = j["TARGET_RELATIVE_ROTATION"];
     USE_RIGID_ATTACHMENT = static_cast<bool>((int)j["USE_RIGID_ATTACHMENT"]);
     USE_DIRECT_PAYLOAD_VELOCITY = static_cast<bool>((int)j["USE_DIRECT_PAYLOAD_VELOCITY"]);  // 新增
-
+    DRAW_ROBOT_VELOCITIES = static_cast<bool>((int)j["DRAW_ROBOT_VELOCITIES"]);
+    SIGMA_FACTOR_PAYLOAD_TWIST = j["SIGMA_FACTOR_PAYLOAD_TWIST"];
 }
 
 Globals::Globals(){};

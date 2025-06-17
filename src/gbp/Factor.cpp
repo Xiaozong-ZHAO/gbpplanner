@@ -6,6 +6,7 @@
 #include <gbp/GBPCore.h>
 #include <gbp/Factor.h>
 #include <gbp/Variable.h>
+#include <Globals.h>
 
 #include <Eigen/Dense>
 #include <Eigen/Core>
@@ -188,6 +189,100 @@ Message Factor::marginalise_factor_dist(const Eigen::VectorXd &eta, const Eigen:
 // You may create a new factor_type_, in the enum in Factor.h (optional, default type is DEFAULT_FACTOR)
 // Create a measurement function h_func_() and optionally Jacobian J_func_().
 
+PayloadTwistFactor::PayloadTwistFactor(int f_id, int r_id, 
+                   std::vector<std::shared_ptr<Variable>> variables,
+                   float sigma, const Eigen::VectorXd& measurement,
+                   std::shared_ptr<Payload> payload,
+                   int contact_point_index)
+    : Factor{f_id, r_id, variables, sigma, measurement},
+      payload_(payload), contact_point_index_(contact_point_index) {
+    factor_type_ = PAYLOAD_TWIST_FACTOR;
+    this->delta_jac = 1e-3;
+}
+
+// 测量函数实现
+Eigen::MatrixXd PayloadTwistFactor::h_func_(const Eigen::VectorXd& X) {
+    // X = [robot_pos(2), robot_vel(2), payload_twist(3)]
+    Eigen::Vector2d robot_pos = X.segment(0, 2);
+    Eigen::Vector2d robot_vel = X.segment(2, 2);
+    Eigen::Vector3d payload_twist = X.segment(4, 3); // [vx, vy, omega]
+    
+    // 计算期望的payload运动
+    auto [desired_linear_vel, desired_angular_vel] = computeDesiredPayloadMotion();
+    
+    // 计算机器人对payload运动的贡献
+    auto [robot_linear_contrib, robot_angular_contrib] = 
+        computeRobotContribution(robot_pos, robot_vel);
+    
+    Eigen::MatrixXd h(3, 1);
+    // 约束1: payload线速度x分量应该匹配期望
+    h(0, 0) = payload_twist(0) - desired_linear_vel.x();
+    // 约束2: payload线速度y分量应该匹配期望  
+    h(1, 0) = payload_twist(1) - desired_linear_vel.y();
+    // 约束3: payload角速度应该匹配期望
+    h(2, 0) = payload_twist(2) - desired_angular_vel;
+    
+    return h;
+}
+
+// 私有方法实现
+std::pair<Eigen::Vector2d, double> PayloadTwistFactor::computeDesiredPayloadMotion() {
+    if (!payload_) return {Eigen::Vector2d::Zero(), 0.0};
+    
+    // 计算期望的payload线速度
+    Eigen::Vector2d payload_to_target = payload_->target_position_ - payload_->position_;
+    Eigen::Vector2d desired_linear_vel = Eigen::Vector2d::Zero();
+    
+    if (payload_to_target.norm() > 0.1) {
+        desired_linear_vel = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
+    }
+    
+    // 计算期望的payload角速度
+    double desired_angular_vel = 0.0;
+    double rotation_error = payload_->getRotationError();
+    
+    if (std::abs(rotation_error) > 0.01) {
+        desired_angular_vel = std::copysign(1.0, rotation_error) * 
+            std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), 
+                    std::abs(rotation_error));
+    }
+    
+    return {desired_linear_vel, desired_angular_vel};
+}
+
+std::pair<double, double> PayloadTwistFactor::computeRobotContribution(
+    const Eigen::Vector2d& robot_pos, const Eigen::Vector2d& robot_vel) {
+    
+    // 获取接触点信息
+    auto [contact_points, contact_normals] = payload_->getContactPointsAndNormals();
+    
+    if (contact_point_index_ >= contact_points.size()) {
+        return {0.0, 0.0};
+    }
+    
+    Eigen::Vector2d contact_normal = contact_normals[contact_point_index_];
+    
+    // 线速度贡献：机器人速度在接触法向的投影
+    double linear_contribution = robot_vel.dot(contact_normal);
+    
+    // 角速度贡献：通过力矩臂计算
+    Eigen::Vector2d payload_center = payload_->getPosition();
+    Eigen::Vector2d contact_point = contact_points[contact_point_index_];
+    Eigen::Vector2d r = contact_point - payload_center;
+    
+    // 计算力矩臂
+    double torque_arm = std::abs(r.x() * contact_normal.y() - r.y() * contact_normal.x());
+    double angular_contribution = torque_arm * linear_contribution;
+    
+    // 标准化为角速度
+    double payload_inertia = payload_->getMomentOfInertia();
+    if (payload_inertia > 1e-6) {
+        angular_contribution /= payload_inertia;
+    }
+    
+    return {linear_contribution, angular_contribution};
+}
+
 // 在文件末尾添加ContactFactor实现
 ContactFactor::ContactFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
                              float sigma, const Eigen::VectorXd& measurement,
@@ -289,30 +384,70 @@ Eigen::MatrixXd PayloadVelocityFactor::h_func_(const Eigen::VectorXd& X) {
 //     return {desired_linear_velocity_component, desired_angular_velocity};
 // }
 
+// std::pair<double, double> PayloadVelocityFactor::computeDesiredPayloadMotion() {
+//     if (!payload_) return {0.0, 0.0};
+    
+//     // 线速度分量（保持现有逻辑）
+//     Eigen::Vector2d payload_to_target = payload_->target_position_ - payload_->position_;
+//     double desired_linear_velocity_component = 0.0;
+    
+//     if (payload_to_target.norm() > 0.1) {
+//         Eigen::Vector2d desired_velocity = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
+//         desired_linear_velocity_component = desired_velocity.dot(contact_normal_);
+//     }
+    
+//     // 角速度（使用修复后的旋转误差计算）
+//     double desired_angular_velocity = 0.0;
+//     double rotation_error = payload_->getRotationError();
+    
+//     if (std::abs(rotation_error) > 0.01) {  // 只有当旋转误差显著时才施加角速度
+//         desired_angular_velocity = std::copysign(1.0, rotation_error) * 
+//             std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), std::abs(rotation_error));
+        
+//         // 调试输出
+//         static int debug_counter = 0;
+//         if (debug_counter++ % 60 == 0) {
+//             std::cout << "Rotation error: " << rotation_error << " rad, desired angular vel: " 
+//                       << desired_angular_velocity << std::endl;
+//         }
+//     }
+    
+//     return {desired_linear_velocity_component, desired_angular_velocity};
+// }
+
 std::pair<double, double> PayloadVelocityFactor::computeDesiredPayloadMotion() {
     if (!payload_) return {0.0, 0.0};
     
-    // 线速度分量（保持现有逻辑）
+    // 线速度分量
     Eigen::Vector2d payload_to_target = payload_->target_position_ - payload_->position_;
     double desired_linear_velocity_component = 0.0;
     
     if (payload_to_target.norm() > 0.1) {
         Eigen::Vector2d desired_velocity = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
-        desired_linear_velocity_component = desired_velocity.dot(contact_normal_);
+        
+        if (globals.USE_RIGID_ATTACHMENT) {
+            // 刚性连接模式：机器人应该直接匹配payload的期望速度
+            // 这里返回期望速度的大小作为目标
+            desired_linear_velocity_component = desired_velocity.norm();
+        } else {
+            // 非刚性连接模式：使用法向量投影
+            desired_linear_velocity_component = desired_velocity.dot(contact_normal_);
+        }
     }
     
-    // 角速度（使用修复后的旋转误差计算）
+    // 角速度计算保持不变
     double desired_angular_velocity = 0.0;
     double rotation_error = payload_->getRotationError();
     
-    if (std::abs(rotation_error) > 0.01) {  // 只有当旋转误差显著时才施加角速度
+    if (std::abs(rotation_error) > 0.01) {
         desired_angular_velocity = std::copysign(1.0, rotation_error) * 
             std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), std::abs(rotation_error));
         
         // 调试输出
         static int debug_counter = 0;
         if (debug_counter++ % 60 == 0) {
-            std::cout << "Rotation error: " << rotation_error << " rad, desired angular vel: " 
+            std::cout << "Rigid attachment mode: " << globals.USE_RIGID_ATTACHMENT 
+                      << ", Rotation error: " << rotation_error << " rad, desired angular vel: " 
                       << desired_angular_velocity << std::endl;
         }
     }
@@ -320,23 +455,103 @@ std::pair<double, double> PayloadVelocityFactor::computeDesiredPayloadMotion() {
     return {desired_linear_velocity_component, desired_angular_velocity};
 }
 
+// std::pair<double, double> PayloadVelocityFactor::computeRobotContribution(
+//     const Eigen::Vector2d& robot_pos, const Eigen::Vector2d& robot_velocity) {
+    
+//     double linear_contribution = robot_velocity.dot(contact_normal_);
+//     double angular_contribution = 0.0;
+    
+//     if (payload_) {
+//         Eigen::Vector2d payload_center = payload_->getPosition();
+//         Eigen::Vector2d contact_point = robot_pos - globals.ROBOT_RADIUS * contact_normal_;
+//         Eigen::Vector2d r = contact_point - payload_center;
+        
+//         double torque_arm = std::abs(r.x() * contact_normal_.y() - r.y() * contact_normal_.x());
+//         angular_contribution = torque_arm * linear_contribution;
+        
+//         double payload_inertia_approx = payload_->getMomentOfInertia();
+//         if (payload_inertia_approx > 1e-6) {
+//             angular_contribution /= payload_inertia_approx;
+//         }
+//     }
+    
+//     return {linear_contribution, angular_contribution};
+// }
+
 std::pair<double, double> PayloadVelocityFactor::computeRobotContribution(
     const Eigen::Vector2d& robot_pos, const Eigen::Vector2d& robot_velocity) {
     
-    double linear_contribution = robot_velocity.dot(contact_normal_);
+    double linear_contribution = 0.0;
     double angular_contribution = 0.0;
     
-    if (payload_) {
+    if (!payload_) return {linear_contribution, angular_contribution};
+    
+    // 检查是否使用刚性连接
+    if (globals.USE_RIGID_ATTACHMENT) {
+        // 刚性连接模式：机器人和payload形成刚体系统
+        
+        // 线速度贡献：机器人速度应该直接匹配payload期望速度
+        Eigen::Vector2d payload_to_target = payload_->target_position_ - payload_->position_;
+        if (payload_to_target.norm() > 0.1) {
+            Eigen::Vector2d desired_payload_velocity = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
+            
+            // 在刚性连接下，机器人的期望速度就是payload的期望速度
+            // 线速度贡献是机器人当前速度与payload期望速度的差
+            linear_contribution = (robot_velocity - desired_payload_velocity).norm();
+        }
+        
+        // 角速度贡献：通过连接点的力矩计算
         Eigen::Vector2d payload_center = payload_->getPosition();
-        Eigen::Vector2d contact_point = robot_pos - globals.ROBOT_RADIUS * contact_normal_;
-        Eigen::Vector2d r = contact_point - payload_center;
         
-        double torque_arm = std::abs(r.x() * contact_normal_.y() - r.y() * contact_normal_.x());
-        angular_contribution = torque_arm * linear_contribution;
+        // 机器人实际连接点位置（从Box2D获取）
+        Eigen::Vector2d connection_point = robot_pos; // 简化：假设机器人中心就是连接点
         
-        double payload_inertia_approx = payload_->getMomentOfInertia();
-        if (payload_inertia_approx > 1e-6) {
-            angular_contribution /= payload_inertia_approx;
+        // 从连接点到payload质心的向量
+        Eigen::Vector2d r = connection_point - payload_center;
+        
+        // 计算期望的payload角速度
+        double desired_payload_angular_velocity = 0.0;
+        double rotation_error = payload_->getRotationError();
+        if (std::abs(rotation_error) > 0.01) {
+            desired_payload_angular_velocity = std::copysign(1.0, rotation_error) * 
+                std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), std::abs(rotation_error));
+        }
+        
+        // 在刚性连接下，机器人在连接点的期望线速度应该满足：
+        // v_robot = v_payload_center + ω_payload × r
+        Eigen::Vector2d current_payload_velocity = payload_->getVelocity();
+        double current_payload_angular_velocity = payload_->getAngularVelocity();
+        
+        // 计算机器人在连接点应该有的速度
+        Eigen::Vector2d perpendicular_r(-r.y(), r.x()); // r的垂直向量
+        Eigen::Vector2d desired_robot_velocity = current_payload_velocity + 
+                                                 current_payload_angular_velocity * perpendicular_r;
+        
+        // 角速度贡献：机器人当前速度与期望速度的差产生的力矩
+        Eigen::Vector2d velocity_error = robot_velocity - desired_robot_velocity;
+        double torque_from_velocity_error = r.x() * velocity_error.y() - r.y() * velocity_error.x();
+        
+        double payload_inertia = payload_->getMomentOfInertia();
+        if (payload_inertia > 1e-6) {
+            angular_contribution = torque_from_velocity_error / payload_inertia;
+        }
+        
+    } else {
+        // 非刚性连接模式：使用原有的法向量投影方法
+        linear_contribution = robot_velocity.dot(contact_normal_);
+        
+        if (payload_) {
+            Eigen::Vector2d payload_center = payload_->getPosition();
+            Eigen::Vector2d contact_point = robot_pos - globals.ROBOT_RADIUS * contact_normal_;
+            Eigen::Vector2d r = contact_point - payload_center;
+            
+            double torque_arm = std::abs(r.x() * contact_normal_.y() - r.y() * contact_normal_.x());
+            angular_contribution = torque_arm * linear_contribution;
+            
+            double payload_inertia_approx = payload_->getMomentOfInertia();
+            if (payload_inertia_approx > 1e-6) {
+                angular_contribution /= payload_inertia_approx;
+            }
         }
     }
     
