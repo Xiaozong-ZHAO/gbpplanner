@@ -841,6 +841,53 @@ void Simulator::createOrDeleteRobots(){
     }
 }
 
+void Simulator::applyTwistPrior() {
+    // 遍历所有 payloads
+    for (auto& [pid, payload] : payloads_) {
+        // 获取对应的 twist 变量
+        auto twist_variable = getPayloadTwistVariable(pid);
+        if (!twist_variable) {
+            std::cout << "Warning: No twist variable found for payload " << pid << std::endl;
+            continue;
+        }
+        
+        // 计算期望的 twist（复用现有逻辑）
+        Eigen::Vector3d desired_twist = Eigen::Vector3d::Zero();
+        
+        // 1. 计算期望的线速度（复用 computeDesiredPayloadVelocity 的逻辑）
+        Eigen::Vector2d payload_to_target = payload->target_position_ - payload->position_;
+        
+        if (payload_to_target.norm() > 0.1) {
+            // 与 computeDesiredPayloadVelocity 保持一致
+            Eigen::Vector2d desired_velocity = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
+            desired_twist(0) = desired_velocity.x();  // vx
+            desired_twist(1) = desired_velocity.y();  // vy
+        }
+        
+        // 2. 计算期望的角速度（复用 computeDesiredPayloadAngularVelocity 的逻辑）
+        double rotation_error = payload->getRotationError();
+        
+        if (std::abs(rotation_error) > 0.01) {
+            // 与 computeDesiredPayloadAngularVelocity 保持一致
+            double desired_angular_velocity = std::copysign(1.0, rotation_error) * 
+                std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), std::abs(rotation_error));
+            desired_twist(2) = desired_angular_velocity;  // omega
+        }
+        
+        // 3. 修改 twist 变量的先验
+        twist_variable->change_variable_prior(desired_twist);
+        
+        // 调试输出
+        static int debug_counter = 0;
+        if (debug_counter++ % 60 == 0) {  // 每60帧输出一次
+            std::cout << "Applied twist prior for payload " << pid 
+                      << ": [" << desired_twist.transpose() << "]" << std::endl;
+            std::cout << "  Position error: " << payload_to_target.norm() 
+                      << ", Rotation error: " << rotation_error << " rad" << std::endl;
+        }
+    }
+}
+
 /*******************************************************************************/
 // Deletes the robot from the simulator's robots_, as well as any variable/factors associated.
 /*******************************************************************************/

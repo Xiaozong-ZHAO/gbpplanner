@@ -87,6 +87,7 @@ public:
     /*******************************************************************************/    
     void createPayloadTwistVariable(int payload_id);
     std::shared_ptr<Variable> getPayloadTwistVariable(int payload_id);
+    void applyTwistPrior();
     
     void assignContactPoints();
     void updateDistributedPayloadControl();
