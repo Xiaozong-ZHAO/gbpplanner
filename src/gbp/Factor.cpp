@@ -94,64 +94,97 @@ Eigen::MatrixXd Factor::jacobianFirstOrder(const Eigen::VectorXd& X0){
 // The Factor potential is calculated using h_func_ and J_func_
 // The factor precision and information is created, and then marginalised to create outgoing messages to its connected variables.
 /*****************************************************************************************************/
-bool Factor::update_factor(){
+bool Factor::update_factor() {
+    // Step 1: 聚合变量的 beliefs，构造线性化点 X_
+    int idx = 0;
+    int n_dofs;
 
-    // Messages from connected variables are aggregated.
-    // The beliefs are used to create the linearisation point X_.
-    int idx = 0; int n_dofs;
-    for (int v=0; v<variables_.size(); v++){
+    for (int v = 0; v < variables_.size(); v++) {
+        if (!variables_[v]) {
+            std::cerr << "[ERROR] Factor::update_factor: variables_[" << v << "] is null!" << std::endl;
+            return false;
+        }
+
+        Key var_key = variables_[v]->key_;
         n_dofs = variables_[v]->n_dofs_;
-        auto& [_, __, mu_belief] = this->inbox_[variables_[v]->key_];
+
+        if (inbox_.count(var_key) == 0) {
+            std::cerr << "[ERROR] Factor::update_factor: inbox_ missing key for variable at index " << v << std::endl;
+            return false;
+        }
+
+        auto& [_, __, mu_belief] = inbox_.at(var_key);
+
+        if (mu_belief.size() != n_dofs) {
+            std::cerr << "[ERROR] update_factor: mu_belief.size() = " << mu_belief.size()
+                      << " != n_dofs = " << n_dofs << " for variable index " << v << std::endl;
+            return false;
+        }
+
+        if (idx + n_dofs > X_.size()) {
+            std::cerr << "[ERROR] update_factor: X_ too small: X_.size() = " << X_.size()
+                      << ", need at least " << (idx + n_dofs) << std::endl;
+            return false;
+        }
+
         X_(seqN(idx, n_dofs)) = mu_belief;
         idx += n_dofs;
     }
 
-    // *Depending on the problem*, we may need to skip computation of this factor.
-    // eg. to avoid extra computation, factor may not be required if two connected variables are too far apart.
-    // in which case send out a Zero Message.
-    if (this->skip_factor()){
-        for (auto var : variables_){
-            this->outbox_[var->key_] = Message(var->n_dofs_);
-        }           
+    // Step 2: 跳过条件判断（根据通信等）
+    if (this->skip_factor()) {
+        for (auto var : variables_) {
+            outbox_[var->key_] = Message(var->n_dofs_);
+        }
         return false;
     }
-    
-    // The Factor potential and linearised Factor Precision and Information is calculated using h_func_ and J_func_
-    // residual() is by default (z - h_func_(X))
-    // Skip calculation of Jacobian if the factor is linear and Jacobian has already been computed once
+
+    // Step 3: 计算残差项与 Jacobian
     h_ = h_func_(X_);
-    J_ = (this->linear_ && this->initialised_)? J_ : this->J_func_(X_);
+    J_ = (this->linear_ && this->initialised_) ? J_ : this->J_func_(X_);
     Eigen::MatrixXd factor_lam_potential = J_.transpose() * meas_model_lambda_ * J_;
     Eigen::VectorXd factor_eta_potential = (J_.transpose() * meas_model_lambda_) * (J_ * X_ + residual());
     this->initialised_ = true;
 
-    //  Update factor precision and information with incoming messages from connected variables.
+    // Step 4: 计算并下发每个变量的消息（marginalise）
     int marginalisation_idx = 0;
-    for (int v_out_idx=0; v_out_idx<variables_.size(); v_out_idx++){
+    for (int v_out_idx = 0; v_out_idx < variables_.size(); v_out_idx++) {
         auto var_out = variables_[v_out_idx];
-        // Initialise with factor values
-        Eigen::VectorXd factor_eta = factor_eta_potential;     
+        Eigen::VectorXd factor_eta = factor_eta_potential;
         Eigen::MatrixXd factor_lam = factor_lam_potential;
-        
-        // Combine the factor with the belief from other variables apart from the receiving variable
+
         int idx_v = 0;
-        for (int v_idx=0; v_idx<variables_.size(); v_idx++){
-            int n_dofs = variables_[v_idx]->n_dofs_;
-            if (variables_[v_idx]->key_ != var_out->key_) {
-                auto [eta_belief, lam_belief, _] = inbox_[variables_[v_idx]->key_];
-                factor_eta(seqN(idx_v, n_dofs)) += eta_belief;
-                factor_lam(seqN(idx_v, n_dofs), seqN(idx_v, n_dofs)) += lam_belief;
+        for (int v_idx = 0; v_idx < variables_.size(); v_idx++) {
+            int nd = variables_[v_idx]->n_dofs_;
+            Key key = variables_[v_idx]->key_;
+
+            if (key != var_out->key_) {
+                if (inbox_.count(key) == 0) {
+                    std::cerr << "[ERROR] Factor::update_factor: inbox_ missing key during marginalisation (v_idx = "
+                              << v_idx << ")" << std::endl;
+                    return false;
+                }
+
+                auto [eta_belief, lam_belief, _] = inbox_[key];
+
+                if (eta_belief.size() != nd || lam_belief.rows() != nd || lam_belief.cols() != nd) {
+                    std::cerr << "[ERROR] Invalid message size in inbox_ for variable " << v_idx << std::endl;
+                    return false;
+                }
+
+                factor_eta(seqN(idx_v, nd)) += eta_belief;
+                factor_lam(seqN(idx_v, nd), seqN(idx_v, nd)) += lam_belief;
             }
-            idx_v += n_dofs;
+
+            idx_v += nd;
         }
-        
-        // Marginalise the Factor Precision and Information to send to the relevant variable
+
         outbox_[var_out->key_] = marginalise_factor_dist(factor_eta, factor_lam, v_out_idx, marginalisation_idx);
         marginalisation_idx += var_out->n_dofs_;
     }
 
     return true;
-};
+}
 
 /*****************************************************************************************************/
 // Marginalise the factor Precision and Information and create the outgoing message to the variable
