@@ -209,6 +209,7 @@ PayloadTwistFactor::PayloadTwistFactor(int f_id, int r_id,
     precomputeGeometry();
     precomputeJacobian();
 }
+// old-version branch
 
 // 测量函数实现
 Eigen::MatrixXd PayloadTwistFactor::h_func_(const Eigen::VectorXd& X) {
