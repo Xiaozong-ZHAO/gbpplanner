@@ -407,8 +407,12 @@ void Simulator::timestep() {
         applyDirectPayloadVelocityControl();
         std::cout << "Using direct payload velocity control" << std::endl;
     } else if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
-        // 分布式GBP控制模式 - 现在只使用 PayloadTwistFactor
+        // 分布式GBP控制模式
         updateDistributedPayloadControl();
+        
+        // *** 新增：在 GBP 迭代之前应用 twist 先验 ***
+        applyTwistPrior();
+        
         std::cout << "Using distributed GBP control (PayloadTwistFactor only)" << std::endl;
     } else {
         // 原有的集中式最小二乘控制
@@ -421,14 +425,14 @@ void Simulator::timestep() {
     // 更新因子（现在只创建 PayloadTwistFactor）
     if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
         for (auto [r_id, robot] : robots_) {
-            robot->updatePayloadFactors(payloads_);  // 只创建 PayloadTwistFactor
+            robot->updatePayloadFactors(payloads_);
             robot->updateInterrobotFactors();
         }
     }
     
     setCommsFailure(globals.COMMS_FAILURE_RATE);
     
-    // GBP迭代（只有 PayloadTwistFactor 参与）
+    // GBP迭代（twist 先验已经在上面设置）
     if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
         for (int i = 0; i < globals.NUM_ITERS; i++) {
             iterateGBP(1, INTERNAL, robots_);
@@ -442,7 +446,7 @@ void Simulator::timestep() {
         }
     }
     
-    // 物理世界更新
+    // 物理世界更新（保持不变）
     if (physicsWorld_) {
         physicsWorld_->Step(globals.TIMESTEP, 8, 3);
         for (auto [r_id, robot] : robots_) {
