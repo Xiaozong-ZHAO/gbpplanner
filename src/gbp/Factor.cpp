@@ -227,20 +227,39 @@ PayloadTwistFactor::PayloadTwistFactor(int f_id, int r_id,
                                        float sigma, const Eigen::VectorXd& measurement,
                                        Eigen::Vector2d r_vector,
                                        Eigen::Vector2d normal_vector)
-    : Factor{f_id, r_id, variables, sigma, measurement},
+    : Factor{f_id, r_id, variables, sigma, measurement, -1},
       r_(r_vector), contact_normal_(normal_vector) {
     
     factor_type_ = PAYLOAD_TWIST_FACTOR;
-    
-    // *** 关键：设置为线性因子，避免重复计算雅可比 ***
     this->linear_ = true;
     
-    // *** 不设置 delta_jac，因为不需要数值微分 ***
-    // this->delta_jac = 1e-3;  // 删除或注释掉
+    // 检查连接的变量
+    if (variables.size() != 2) {
+        std::cerr << "PayloadTwistFactor: Expected 2 variables, got " << variables.size() << std::endl;
+    }
     
-    // 预计算几何参数和雅可比
+    // 如果几何参数非零，立即预计算
+    if (r_.norm() > 1e-6 && contact_normal_.norm() > 1e-6) {
+        precomputeGeometry();
+        precomputeJacobian();
+    } else {
+        std::cout << "PayloadTwistFactor " << f_id_ 
+                  << " created with zero geometry (will be updated later)" << std::endl;
+    }
+}
+
+void PayloadTwistFactor::updateGeometry(const Eigen::Vector2d& r_vector, 
+                                       const Eigen::Vector2d& normal_vector) {
+    // 更新几何参数
+    r_ = r_vector;
+    contact_normal_ = normal_vector;
+    
+    // 重新计算几何量和雅可比
     precomputeGeometry();
     precomputeJacobian();
+    
+    std::cout << "PayloadTwistFactor " << f_id_ << " updated geometry: r=" 
+              << r_.transpose() << ", n=" << contact_normal_.transpose() << std::endl;
 }
 
 // 测量函数实现

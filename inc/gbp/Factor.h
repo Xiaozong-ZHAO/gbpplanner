@@ -110,6 +110,8 @@ public:
     // 重写的虚函数声明
     Eigen::MatrixXd h_func_(const Eigen::VectorXd& X) override;
     Eigen::MatrixXd J_func_(const Eigen::VectorXd& X) override;
+    void updateGeometry(const Eigen::Vector2d& r_vector, 
+                       const Eigen::Vector2d& normal_vector);
     
 private:
     // 私有方法声明

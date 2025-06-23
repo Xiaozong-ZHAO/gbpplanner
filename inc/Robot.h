@@ -39,6 +39,8 @@ public:
 
 
     Simulator* sim_;                            // Pointer to the simulator
+    std::vector<std::shared_ptr<Variable>> payload_twist_variables_;     // 多个payload变量
+    std::vector<std::shared_ptr<PayloadTwistFactor>> payload_twist_factors_; // 对应的因子
     int rid_ = 0;                               // Robot id
     std::deque<Eigen::VectorXd> waypoints_{};   // Dequeue of waypoints (whenever the robot reaches a point, it is popped off the front of the dequeue)
     float robot_radius_ = 1.;                   // Robot radius
@@ -57,11 +59,22 @@ public:
     b2World* physicsWorld_;
     bool usePhysics_;
     b2WeldJoint* payload_joint_;  // 新增：与payload的焊接关节
+    Eigen::Vector2d cached_r_vector_;                   // 缓存的力臂向量
+    Eigen::Vector2d cached_contact_normal_;             // 缓存的接触法向量
+    bool payload_geometry_cached_;                      // 几何参数是否已缓存
 
     // 简化后的payload相关方法
     void updatePayloadFactors(const std::map<int, std::shared_ptr<Payload>>& payloads);
     // void createPayloadFactors(std::shared_ptr<Payload> payload);
     // void deletePayloadFactors(std::shared_ptr<Payload> payload);
+    // 修正：payload相关方法
+    void updatePayloadTwistPriors();                    // 注意：复数形式
+    std::vector<Eigen::Vector3d> computeDesiredPayloadTwists();  // 返回多个twist
+    void updatePayloadFactorGeometry();                 // 更新因子的几何参数
+    void cachePayloadGeometry();                        // 缓存payload几何参数
+    Eigen::Vector3d interpolatePayloadTwist(int var_index, 
+                                           const Eigen::Vector3d& current_twist,
+                                           const Eigen::Vector3d& target_twist);
     
     // 查询方法
     bool isConnectedToPayload(int payload_id) const;

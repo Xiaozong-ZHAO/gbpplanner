@@ -89,6 +89,66 @@ Robot::Robot(Simulator* sim,
         this->factors_[fac_obs->key_] = fac_obs;
     }
 
+    payload_twist_variables_.clear();  // 初始化容器
+    payload_geometry_cached_ = false;
+    
+    if (globals.FORMATION == "Payload") {
+        std::cout << "Creating " << num_variables_ << " payload twist variables for robot " << rid_ << std::endl;
+        
+        for (int i = 0; i < num_variables_; i++) {
+            // 创建payload twist variable [vx, vy, omega] - 3DOF
+            Eigen::VectorXd payload_twist_mu = Eigen::VectorXd::Zero(3);
+            
+            // 与robot variable类似的先验设置
+            double sigma = (i == 0 || i == num_variables_ - 1) ? globals.SIGMA_POSE_FIXED : 0.;
+            Eigen::VectorXd payload_sigma_list = Eigen::VectorXd::Constant(3, sigma);
+            
+            auto payload_var = std::make_shared<Variable>(
+                sim->next_vid_++, rid_, 
+                payload_twist_mu, payload_sigma_list, 
+                robot_radius_, 3  // 3DOF
+            );
+            
+            // 添加到robot的variables映射和payload专用容器
+            variables_[payload_var->key_] = payload_var;
+            payload_twist_variables_.push_back(payload_var);
+            
+            std::cout << "  Created payload twist variable " << i 
+                      << " with key (" << payload_var->key_.robot_id_ 
+                      << "," << payload_var->key_.node_id_ << ")" << std::endl;
+        }
+    }
+
+    /***************************************************************************/
+    /* 创建PayloadTwistFactors连接对应的robot和payload variables */
+    /* 只为中间变量创建因子，不包括当前状态(0)和地平线状态(最后一个) */
+    /***************************************************************************/
+    if (globals.FORMATION == "Payload" && !payload_twist_variables_.empty()) {
+        
+        for (int i = 1; i < num_variables_ - 1; i++) {
+            std::vector<std::shared_ptr<Variable>> variables{
+                getVar(i),                        // robot variable i (4DOF)
+                payload_twist_variables_[i]       // payload variable i (3DOF)
+            };
+            
+            // 注意：几何参数需要在运行时获取，这里先用零值
+            // 实际几何参数将在createPayloadTwistFactor()中设置
+            auto factor = std::make_shared<PayloadTwistFactor>(
+                sim->next_fid_++, rid_, variables,
+                globals.SIGMA_FACTOR_PAYLOAD_TWIST,
+                Eigen::VectorXd::Zero(2),
+                Eigen::Vector2d::Zero(),    // 临时：r_vector
+                Eigen::Vector2d::Zero()     // 临时：contact_normal
+            );
+            
+            // 添加到因子图
+            for (auto var : factor->variables_) var->add_factor(factor);
+            factors_[factor->key_] = factor;
+            payload_twist_factors_.push_back(factor);  // 保存引用用于后续更新几何参数
+        }
+    }
+
+
 };
 
 /***************************************************************************************************/
@@ -96,6 +156,129 @@ Robot::Robot(Simulator* sim,
 /***************************************************************************************************/
 Robot::~Robot(){
     detachFromPayload();
+}
+
+void Robot::cachePayloadGeometry() {
+    if (payload_geometry_cached_ || sim_->payloads_.empty()) return;
+    
+    auto payload = sim_->payloads_.begin()->second;
+    auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
+    
+    if (assigned_contact_point_index_ >= contact_points.size()) {
+        std::cout << "Warning: Invalid contact point index for robot " << rid_ << std::endl;
+        return;
+    }
+    
+    // 缓存几何参数
+    Eigen::Vector2d contact_point = contact_points[assigned_contact_point_index_];
+    Eigen::Vector2d payload_center = payload->getPosition();
+    
+    cached_r_vector_ = contact_point - payload_center;
+    cached_contact_normal_ = contact_normals[assigned_contact_point_index_];
+    payload_geometry_cached_ = true;
+    
+    std::cout << "Robot " << rid_ << " cached geometry: r=" 
+              << cached_r_vector_.transpose() << ", n=" 
+              << cached_contact_normal_.transpose() << std::endl;
+}
+
+void Robot::updatePayloadFactorGeometry() {
+    if (payload_twist_factors_.empty()) return;
+    
+    // 首先缓存几何参数
+    cachePayloadGeometry();
+    if (!payload_geometry_cached_) return;
+    
+    // 更新所有PayloadTwistFactor的几何参数
+    for (auto factor : payload_twist_factors_) {
+        factor->updateGeometry(cached_r_vector_, cached_contact_normal_);
+    }
+    
+    std::cout << "Robot " << rid_ << " updated geometry for " 
+              << payload_twist_factors_.size() << " PayloadTwistFactors" << std::endl;
+}
+
+std::vector<Eigen::Vector3d> Robot::computeDesiredPayloadTwists() {
+    std::vector<Eigen::Vector3d> desired_twists;
+    
+    if (sim_->payloads_.empty() || payload_twist_variables_.empty()) {
+        return std::vector<Eigen::Vector3d>(num_variables_, Eigen::Vector3d::Zero());
+    }
+    
+    auto payload = sim_->payloads_.begin()->second;
+    
+    // 计算当前和目标twist
+    Eigen::Vector3d current_twist = Eigen::Vector3d::Zero();
+    Eigen::Vector2d current_velocity = payload->getVelocity();
+    current_twist(0) = current_velocity.x();
+    current_twist(1) = current_velocity.y();
+    current_twist(2) = payload->getAngularVelocity();
+    
+    // 计算目标twist
+    Eigen::Vector3d target_twist = Eigen::Vector3d::Zero();
+    
+    // 线速度
+    Eigen::Vector2d payload_to_target = payload->target_position_ - payload->position_;
+    if (payload_to_target.norm() > 0.1) {
+        Eigen::Vector2d desired_velocity = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
+        target_twist(0) = desired_velocity.x();
+        target_twist(1) = desired_velocity.y();
+    }
+    
+    // 角速度
+    double rotation_error = payload->getRotationError();
+    if (std::abs(rotation_error) > 0.01) {
+        double desired_angular_velocity = std::copysign(1.0, rotation_error) * 
+            std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), std::abs(rotation_error));
+        target_twist(2) = desired_angular_velocity;
+    }
+    
+    // 为每个时间步插值计算期望twist
+    for (int i = 0; i < num_variables_; i++) {
+        Eigen::Vector3d interpolated_twist = interpolatePayloadTwist(i, current_twist, target_twist);
+        desired_twists.push_back(interpolated_twist);
+    }
+    
+    return desired_twists;
+}
+
+Eigen::Vector3d Robot::interpolatePayloadTwist(int var_index, 
+                                              const Eigen::Vector3d& current_twist,
+                                              const Eigen::Vector3d& target_twist) {
+    if (var_index == 0) {
+        // 当前状态：使用当前twist
+        return current_twist;
+    } else if (var_index == num_variables_ - 1) {
+        // 地平线状态：使用目标twist
+        return target_twist;
+    } else {
+        // 中间状态：线性插值
+        double alpha = (double)var_index / (double)(num_variables_ - 1);
+        return (1.0 - alpha) * current_twist + alpha * target_twist;
+    }
+}
+
+void Robot::updatePayloadTwistPriors() {
+    if (payload_twist_variables_.empty()) return;
+    
+    // 计算所有时间步的期望twist
+    std::vector<Eigen::Vector3d> desired_twists = computeDesiredPayloadTwists();
+    
+    // 更新每个payload variable的先验
+    for (int i = 0; i < payload_twist_variables_.size() && i < desired_twists.size(); i++) {
+        payload_twist_variables_[i]->change_variable_prior(desired_twists[i]);
+    }
+    
+    // 调试输出
+    static int debug_counter = 0;
+    if (debug_counter++ % 60 == 0) {  // 每60帧输出一次
+        std::cout << "Robot " << rid_ << " updated " << payload_twist_variables_.size() 
+                  << " payload twist priors" << std::endl;
+        if (!desired_twists.empty()) {
+            std::cout << "  Current: [" << desired_twists[0].transpose() << "]" << std::endl;
+            std::cout << "  Target:  [" << desired_twists.back().transpose() << "]" << std::endl;
+        }
+    }
 }
 
 // Robot.cpp 中的正确实现
@@ -241,91 +424,6 @@ void Robot::deletePayloadTwistFactors(int payload_id) {
     std::cout << "Deleted " << factors_to_delete.size() 
               << " PayloadTwistFactors for payload " << payload_id << std::endl;
 }
-
-/*
-// *** 临时注释掉，避免与 PayloadTwistFactor 冲突 ***
-void Robot::createPayloadFactors(std::shared_ptr<Payload> payload) {
-    int pid = payload->payload_id_;
-    
-    // 直接使用getContactPointsAndNormals获取接触点和法向量
-    auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
-    
-    if (assigned_contact_point_index_ >= contact_points.size()) {
-        std::cout << "Warning: Robot " << rid_ << " assigned contact point index " 
-                  << assigned_contact_point_index_ << " out of range" << std::endl;
-        return;
-    }
-    
-    // 使用分配的接触点
-    Eigen::Vector2d target_contact_point = contact_points[assigned_contact_point_index_];
-    Eigen::Vector2d contact_normal = contact_normals[assigned_contact_point_index_];
-    
-    // 为除了当前状态外的所有变量创建payload因子
-    for (int i = 1; i < num_variables_; i++) {
-        std::vector<std::shared_ptr<Variable>> variables{getVar(i)};
-        
-        // 创建接触保持因子
-        auto contact_factor = std::make_shared<ContactFactor>(
-            sim_->next_fid_++, rid_, variables,
-            globals.SIGMA_FACTOR_CONTACT,
-            Eigen::VectorXd::Zero(1),
-            payload, target_contact_point, sim_
-        );
-        
-        // 创建速度对齐因子
-        auto velocity_factor = std::make_shared<PayloadVelocityFactor>(
-            sim_->next_fid_++, rid_, variables,
-            globals.SIGMA_FACTOR_PAYLOAD_VELOCITY,
-            Eigen::VectorXd::Zero(2),
-            payload, contact_normal
-        );
-        
-        // 添加到变量的因子列表
-        for (auto var : contact_factor->variables_) var->add_factor(contact_factor);
-        for (auto var : velocity_factor->variables_) var->add_factor(velocity_factor);
-        
-        // 添加到robot的factors_映射
-        this->factors_[contact_factor->key_] = contact_factor;
-        this->factors_[velocity_factor->key_] = velocity_factor;
-    }
-    
-    // 添加到connected payloads列表
-    this->connected_payload_ids_.push_back(payload->payload_id_);
-}
-*/
-
-/*
-// *** 临时注释掉，只保留 PayloadTwistFactor ***
-void Robot::deletePayloadFactors(std::shared_ptr<Payload> payload) {
-    std::vector<Key> factors_to_delete{};
-    
-    // 查找所有与此payload相关的因子
-    for (auto& [f_key, fac] : this->factors_) {
-        if (fac->factor_type_ == CONTACT_FACTOR) {
-            if (auto contact_fac = std::dynamic_pointer_cast<ContactFactor>(fac)) {
-                if (contact_fac->getPayloadId() == payload->payload_id_) {
-                    factors_to_delete.push_back(f_key);
-                }
-            }
-        } else if (fac->factor_type_ == PAYLOAD_VELOCITY_FACTOR) {
-            if (auto velocity_fac = std::dynamic_pointer_cast<PayloadVelocityFactor>(fac)) {
-                if (velocity_fac->getPayloadId() == payload->payload_id_) {
-                    factors_to_delete.push_back(f_key);
-                }
-            }
-        }
-    }
-    
-    // 删除因子
-    for (auto f_key : factors_to_delete) {
-        auto fac = this->factors_[f_key];
-        for (auto& var : fac->variables_) {
-            var->delete_factor(f_key);
-        }
-        this->factors_.erase(f_key);
-    }
-}
-*/
 
 bool Robot::isConnectedToPayload(int payload_id) const {
     return std::find(connected_payload_ids_.begin(), connected_payload_ids_.end(), payload_id) 

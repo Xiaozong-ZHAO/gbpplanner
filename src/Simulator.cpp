@@ -403,37 +403,40 @@ void Simulator::timestep() {
     
     // 根据配置选择控制方法
     if (globals.USE_DIRECT_PAYLOAD_VELOCITY) {
-        // 直接速度控制模式
         applyDirectPayloadVelocityControl();
-        std::cout << "Using direct payload velocity control" << std::endl;
     } else if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
-        // 分布式GBP控制模式
         updateDistributedPayloadControl();
-        
-        // *** 新增：在 GBP 迭代之前应用 twist 先验 ***
-        applyTwistPrior();
-        
-        std::cout << "Using distributed GBP control (PayloadTwistFactor only)" << std::endl;
     } else {
-        // 原有的集中式最小二乘控制
         computeLeastSquares();
-        std::cout << "Using centralized least squares control" << std::endl;
     }
     
     calculateRobotNeighbours(robots_);
     
-    // 更新因子（现在只创建 PayloadTwistFactor）
+    // 更新因子几何参数（一次性）
+    static bool geometry_updated = false;
+    if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY && !geometry_updated) {
+        for (auto [r_id, robot] : robots_) {
+            robot->updatePayloadFactorGeometry();  // 更新几何参数
+        }
+        geometry_updated = true;
+    }
+    
+    // 更新因子连接（如果还需要的话）
     if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
         for (auto [r_id, robot] : robots_) {
-            robot->updatePayloadFactors(payloads_);
-            robot->updateInterrobotFactors();
+            robot->updateInterrobotFactors();  // 机器人间因子
         }
     }
     
     setCommsFailure(globals.COMMS_FAILURE_RATE);
     
-    // GBP迭代（twist 先验已经在上面设置）
+    // GBP迭代
     if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
+        // *** 关键修改：更新所有payload twist先验 ***
+        for (auto [r_id, robot] : robots_) {
+            robot->updatePayloadTwistPriors();  // 注意：复数形式
+        }
+        
         for (int i = 0; i < globals.NUM_ITERS; i++) {
             iterateGBP(1, INTERNAL, robots_);
             iterateGBP(1, EXTERNAL, robots_);
@@ -446,7 +449,7 @@ void Simulator::timestep() {
         }
     }
     
-    // 物理世界更新（保持不变）
+    // 物理世界更新保持不变
     if (physicsWorld_) {
         physicsWorld_->Step(globals.TIMESTEP, 8, 3);
         for (auto [r_id, robot] : robots_) {
