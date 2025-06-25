@@ -3,7 +3,7 @@
   "ASSETS_DIR": "../assets/",
   
   "#": "Display parameters",
-  "DISPLAY": 1,
+  "DISPLAY": 0,
   "WORLD_SZ": 100,
   "SCREEN_SZ": 1000,
   "DRAW_INTERROBOT": 0,

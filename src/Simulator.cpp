@@ -432,10 +432,6 @@ void Simulator::timestep() {
     
     // GBP迭代
     if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
-        // *** 关键修改：更新所有payload twist先验 ***
-        for (auto [r_id, robot] : robots_) {
-            robot->updatePayloadTwistPriors();  // 注意：复数形式
-        }
         
         for (int i = 0; i < globals.NUM_ITERS; i++) {
             iterateGBP(1, INTERNAL, robots_);
@@ -474,11 +470,6 @@ void Simulator::updateDistributedPayloadControl() {
                 connected_robots++;
             }
         }
-        
-        // if (connected_robots > 0) {
-        //     std::cout << "Payload " << pid << " has " << connected_robots 
-        //               << " robots connected via factors" << std::endl;
-        // }
     }
 }
 
@@ -523,27 +514,6 @@ void Simulator::setCommsFailure(float failure_rate){
     }
 }
 
-void Simulator::createPayloadTwistVariable(int payload_id) {
-    // 创建 payload twist 变量 [vx, vy, omega] (3 DOF)
-    Eigen::VectorXd initial_twist = Eigen::VectorXd::Zero(3);
-    Eigen::VectorXd sigma_list = Eigen::VectorXd::Constant(3, 1.0); // 初始不确定性
-    
-    auto twist_variable = std::make_shared<Variable>(
-        next_vid_++, 
-        -1, // 特殊robot id，表示这是共享变量
-        initial_twist, 
-        sigma_list, 
-        1.0f, // size for visualization
-        3   // n_dofs
-    );
-    
-    payload_twist_variables_[payload_id] = twist_variable;
-}
-
-std::shared_ptr<Variable> Simulator::getPayloadTwistVariable(int payload_id) {
-    auto it = payload_twist_variables_.find(payload_id);
-    return (it != payload_twist_variables_.end()) ? it->second : nullptr;
-}
 
 /*******************************************************************************/
 // Handles keypresses and mouse input, and updates camera.
@@ -652,12 +622,8 @@ void Simulator::createOrDeleteRobots(){
         // 获取payload信息
         if (payloads_.empty()) return;
         
-        // 1. 首先为所有payload创建 twist 变量
-        std::cout << "Creating payload twist variables..." << std::endl;
-        for (auto& [pid, payload] : payloads_) {
-            createPayloadTwistVariable(pid);
-            std::cout << "Created twist variable for payload " << pid << std::endl;
-        }
+        // *** 删除：不再在simulator中创建twist variables ***
+        // createPayloadTwistVariable() 调用已删除
         
         auto payload = payloads_.begin()->second;
         auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
@@ -667,7 +633,7 @@ void Simulator::createOrDeleteRobots(){
             return;
         }
         
-        // 2. 创建机器人
+        // 创建机器人（每个robot会在构造函数中自动创建payload variables）
         std::cout << "Creating robots for payload formation..." << std::endl;
         for (int i = 0; i < globals.NUM_ROBOTS; i++) {
             int contact_point_index = i % contact_points.size();
@@ -776,18 +742,15 @@ void Simulator::createOrDeleteRobots(){
     
     // 2. 针对 Payload formation 的特殊处理
     if (globals.FORMATION == "Payload" && !payloads_.empty()) {
-        std::cout << "Setting up payload-specific factors and connections..." << std::endl;
+        std::cout << "Setting up payload-specific connections..." << std::endl;
         
         auto payload = payloads_.begin()->second;
         auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
         
-        // 2.1 为每个新创建的机器人建立 payload twist 因子连接
+        // 2.1 更新每个机器人的PayloadTwistFactor几何参数
         for (auto robot : robots_to_create) {
-            for (auto& [pid, payload] : payloads_) {
-                std::cout << "Creating payload twist factors for robot " << robot->rid_ 
-                          << " and payload " << pid << std::endl;
-                robot->createPayloadTwistFactors(payload);
-            }
+            std::cout << "Updating payload factor geometry for robot " << robot->rid_ << std::endl;
+            robot->updatePayloadFactorGeometry();  // 设置正确的几何参数
         }
         
         // 2.2 可选：设置刚性连接（如果启用）
@@ -804,25 +767,10 @@ void Simulator::createOrDeleteRobots(){
             }
         } else {
             std::cout << "Rigid attachment disabled - robots will rely purely on factor-based control" << std::endl;
-            for (auto robot : robots_to_create) {
-                std::cout << "Robot " << robot->rid_ << " will use factor-based control only" << std::endl;
-            }
         }
         
-        // *** 2.3 注释掉传统payload因子的创建，避免与PayloadTwistFactor冲突 ***
-        /*
-        // 为每个新机器人创建传统的 payload 因子（接触和速度因子）
-        if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
-            std::cout << "Creating traditional payload factors (contact & velocity)..." << std::endl;
-            for (auto robot : robots_to_create) {
-                for (auto& [pid, payload] : payloads_) {
-                    robot->updatePayloadFactors(payloads_);
-                }
-            }
-        }
-        */
-        std::cout << "*** Traditional payload factors (ContactFactor & PayloadVelocityFactor) are temporarily disabled ***" << std::endl;
-        std::cout << "*** Only using PayloadTwistFactor for distributed control ***" << std::endl;
+        std::cout << "*** Using new distributed PayloadTwistFactor architecture ***" << std::endl;
+        std::cout << "*** Each robot owns its payload twist variables and factors ***" << std::endl;
     }
     
     // ========== 机器人删除流程 ==========
@@ -840,58 +788,10 @@ void Simulator::createOrDeleteRobots(){
     std::cout << "- Formation: " << globals.FORMATION << std::endl;
     
     if (globals.FORMATION == "Payload") {
-        std::cout << "- Payload twist variables: " << payload_twist_variables_.size() << std::endl;
         std::cout << "- Rigid attachment: " << (globals.USE_RIGID_ATTACHMENT ? "enabled" : "disabled") << std::endl;
         std::cout << "- Distributed control: " << (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL ? "enabled" : "disabled") << std::endl;
         std::cout << "- Direct velocity control: " << (globals.USE_DIRECT_PAYLOAD_VELOCITY ? "enabled" : "disabled") << std::endl;
-        std::cout << "- Active factors: PayloadTwistFactor only (traditional factors disabled)" << std::endl;
-    }
-}
-
-void Simulator::applyTwistPrior() {
-    // 遍历所有 payloads
-    for (auto& [pid, payload] : payloads_) {
-        // 获取对应的 twist 变量
-        auto twist_variable = getPayloadTwistVariable(pid);
-        if (!twist_variable) {
-            std::cout << "Warning: No twist variable found for payload " << pid << std::endl;
-            continue;
-        }
-        
-        // 计算期望的 twist（复用现有逻辑）
-        Eigen::Vector3d desired_twist = Eigen::Vector3d::Zero();
-        
-        // 1. 计算期望的线速度（复用 computeDesiredPayloadVelocity 的逻辑）
-        Eigen::Vector2d payload_to_target = payload->target_position_ - payload->position_;
-        
-        if (payload_to_target.norm() > 0.1) {
-            // 与 computeDesiredPayloadVelocity 保持一致
-            Eigen::Vector2d desired_velocity = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
-            desired_twist(0) = desired_velocity.x();  // vx
-            desired_twist(1) = desired_velocity.y();  // vy
-        }
-        
-        // 2. 计算期望的角速度（复用 computeDesiredPayloadAngularVelocity 的逻辑）
-        double rotation_error = payload->getRotationError();
-        
-        if (std::abs(rotation_error) > 0.01) {
-            // 与 computeDesiredPayloadAngularVelocity 保持一致
-            double desired_angular_velocity = std::copysign(1.0, rotation_error) * 
-                std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), std::abs(rotation_error));
-            desired_twist(2) = desired_angular_velocity;  // omega
-        }
-        
-        // 3. 修改 twist 变量的先验
-        twist_variable->change_variable_prior(desired_twist);
-        
-        // 调试输出
-        static int debug_counter = 0;
-        if (debug_counter++ % 60 == 0) {  // 每60帧输出一次
-            std::cout << "Applied twist prior for payload " << pid 
-                      << ": [" << desired_twist.transpose() << "]" << std::endl;
-            std::cout << "  Position error: " << payload_to_target.norm() 
-                      << ", Rotation error: " << rotation_error << " rad" << std::endl;
-        }
+        std::cout << "- Architecture: Each robot owns its payload variables and factors" << std::endl;
     }
 }
 

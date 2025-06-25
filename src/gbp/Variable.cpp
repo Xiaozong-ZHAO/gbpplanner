@@ -23,15 +23,76 @@
 //      (eg. sigma_prior_list(0)^2 is the covariance of the first element of the variable (x coordinate).
 //      This is used to create the Precision (Lambda) of the prior as Lambda = diag(sigma_prior_list)
 /***********************************************************************************************************/
+// Variable::Variable(int v_id, int r_id, const Eigen::VectorXd& mu_prior, const Eigen::VectorXd& sigma_prior_list,
+//                    float size, int n_dofs)
+//             : v_id_(v_id), r_id_(r_id), key_(Key(r_id, v_id)), mu_(mu_prior), size_(size), n_dofs_(n_dofs) {
+//                 lam_prior_ = sigma_prior_list.cwiseProduct(sigma_prior_list).cwiseInverse().asDiagonal();
+//                 if (!lam_prior_.allFinite()) lam_prior_.setZero();
+//                 eta_prior_ = lam_prior_ * mu_prior;
+//                 belief_ = Message(eta_prior_, lam_prior_, mu_prior);
+
+//             };
+
+// Variable::Variable(int v_id, int r_id, const Eigen::VectorXd& mu_prior, const Eigen::VectorXd& sigma_prior_list,
+//                    float size, int n_dofs)
+//             : v_id_(v_id), r_id_(r_id), key_(Key(r_id, v_id)), mu_(mu_prior), size_(size), n_dofs_(n_dofs) {
+                
+//     lam_prior_ = sigma_prior_list.cwiseProduct(sigma_prior_list).cwiseInverse().asDiagonal();
+//     if (!lam_prior_.allFinite()) lam_prior_.setZero();
+//     eta_prior_ = lam_prior_ * mu_prior;
+    
+//     // *** 问题可能在这里 ***
+//     // 原来的代码可能是：
+//     // belief_ = Message(eta_prior_, lam_prior_, mu_prior);
+    
+//     // 修复：确保Message使用正确的维度
+//     belief_ = Message(n_dofs);  // 先创建正确维度的空消息
+//     belief_.eta = eta_prior_;   // 然后设置内容
+//     belief_.lambda = lam_prior_;
+//     belief_.mu = mu_prior;
+// };
+
 Variable::Variable(int v_id, int r_id, const Eigen::VectorXd& mu_prior, const Eigen::VectorXd& sigma_prior_list,
                    float size, int n_dofs)
             : v_id_(v_id), r_id_(r_id), key_(Key(r_id, v_id)), mu_(mu_prior), size_(size), n_dofs_(n_dofs) {
-                lam_prior_ = sigma_prior_list.cwiseProduct(sigma_prior_list).cwiseInverse().asDiagonal();
-                if (!lam_prior_.allFinite()) lam_prior_.setZero();
-                eta_prior_ = lam_prior_ * mu_prior;
-                belief_ = Message(eta_prior_, lam_prior_, mu_prior);
-
-            };
+    
+    // 计算精度矩阵，添加数值稳定性检查
+    Eigen::VectorXd precision_diag = sigma_prior_list.cwiseProduct(sigma_prior_list).cwiseInverse();
+    
+    // *** 关键修复：避免无穷大精度 ***
+    const double max_precision = 1e12;  // 限制最大精度
+    const double min_precision = 1e-12; // 限制最小精度
+    
+    for (int i = 0; i < precision_diag.size(); i++) {
+        if (!std::isfinite(precision_diag(i)) || precision_diag(i) > max_precision) {
+            precision_diag(i) = max_precision;
+            // std::cout << "Clamped precision for variable (" << r_id << "," << v_id 
+            //           << ") element " << i << std::endl;
+        } else if (precision_diag(i) < min_precision) {
+            precision_diag(i) = min_precision;
+        }
+    }
+    
+    lam_prior_ = precision_diag.asDiagonal();
+    eta_prior_ = lam_prior_ * mu_prior;
+    
+    // 确保belief正确初始化
+    belief_ = Message(n_dofs);
+    belief_.eta = eta_prior_;
+    belief_.lambda = lam_prior_;
+    belief_.mu = mu_prior;
+    
+    // 验证初始化
+    if (!belief_.lambda.allFinite() || !belief_.mu.allFinite()) {
+        std::cerr << "[ERROR] Variable (" << r_id << "," << v_id 
+                  << ") initialized with invalid belief!" << std::endl;
+        
+        // 强制设置为有效状态
+        belief_.lambda = Eigen::MatrixXd::Identity(n_dofs, n_dofs) * 1e-6;
+        belief_.eta = belief_.lambda * mu_prior;
+        belief_.mu = mu_prior;
+    }
+}
 
 /***********************************************************************************************************/
 // Destructor: deletes all connected factors too
@@ -58,6 +119,7 @@ void Variable::update_belief(){
         eta_ += eta_msg;
         lam_ += lam_msg;
     }
+    
     // Update belief
     sigma_ = lam_.inverse();
     valid_ = sigma_.allFinite();

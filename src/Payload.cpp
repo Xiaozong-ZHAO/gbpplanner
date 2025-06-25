@@ -147,9 +147,9 @@ void Payload::draw() {
         // 箭头长度为payload宽度的一半
         float arrow_length = std::max(width_, height_) * 0.5f;
         Vector3 arrow_end = {
-            target_center.x + arrow_length * cos(target_angle),
+            static_cast<float>(target_center.x + arrow_length * std::cos(target_angle)),
             target_center.y,
-            target_center.z + arrow_length * sin(target_angle)
+            static_cast<float>(target_center.z + arrow_length * std::sin(target_angle))
         };
         
         // 绘制朝向箭头

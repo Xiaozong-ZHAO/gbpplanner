@@ -30,13 +30,13 @@ void FactorGraph::factorIteration(MsgPassingMode msg_passing_mode){
         auto f_it = factors_.begin(); std::advance(f_it, f_idx);
         auto [f_key, fac] = *f_it;
 
-        for (auto var : fac->variables_){
-            // Check if the factor need to be skipped [see note in description]
-            if (!interrobot_comms_active_ && fac->other_rid_!=robot_id_) continue;
-            if (msg_passing_mode==INTERNAL && fac->other_rid_!=robot_id_) continue;
-            // Read message from each connected variable
-            fac->inbox_[var->key_] = var->outbox_.at(f_key);
-        }
+for (auto var : fac->variables_){
+    // Check if the factor need to be skipped [see note in description]
+    if (!interrobot_comms_active_ && fac->other_rid_!=robot_id_) continue;
+    if (msg_passing_mode==INTERNAL && fac->other_rid_!=robot_id_) continue;
+    // Read message from each connected variable
+    fac->inbox_[var->key_] = var->outbox_.at(f_key);
+}
         // Calculate factor potential and create outgoing messages
         fac->update_factor();
     };

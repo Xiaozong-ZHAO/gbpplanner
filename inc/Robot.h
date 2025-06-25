@@ -64,7 +64,6 @@ public:
     bool payload_geometry_cached_;                      // 几何参数是否已缓存
 
     // 简化后的payload相关方法
-    void updatePayloadFactors(const std::map<int, std::shared_ptr<Payload>>& payloads);
     // void createPayloadFactors(std::shared_ptr<Payload> payload);
     // void deletePayloadFactors(std::shared_ptr<Payload> payload);
     // 修正：payload相关方法
@@ -88,7 +87,6 @@ public:
     /****************************************/
     // 新增：绘制速度向量的方法
     void drawVelocityVector();
-    void createPayloadTwistFactors(std::shared_ptr<Payload> payload);
     void deletePayloadTwistFactors(int payload_id);
 
     

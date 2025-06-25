@@ -92,32 +92,98 @@ Robot::Robot(Simulator* sim,
     payload_twist_variables_.clear();  // 初始化容器
     payload_geometry_cached_ = false;
     
-    if (globals.FORMATION == "Payload") {
-        std::cout << "Creating " << num_variables_ << " payload twist variables for robot " << rid_ << std::endl;
+if (globals.FORMATION == "Payload") {
+    // 获取 payload 信息进行插值计算
+    if (!sim_->payloads_.empty()) {
+        auto payload = sim_->payloads_.begin()->second;
         
+        // 1. 计算 payload 的起始状态 [x, y, vx, vy, ω]
+        Eigen::VectorXd payload_start(5);
+        payload_start(0) = payload->getPosition().x();       // 当前位置 x
+        payload_start(1) = payload->getPosition().y();       // 当前位置 y
+        payload_start(2) = payload->getVelocity().x();       // 当前线速度 vx
+        payload_start(3) = payload->getVelocity().y();       // 当前线速度 vy  
+        payload_start(4) = payload->getAngularVelocity();    // 当前角速度 ω
+        
+        // 2. 计算 payload 的目标状态 [x, y, vx, vy, ω]
+        Eigen::VectorXd payload_target(5);
+        payload_target(0) = payload->target_position_.x();   // 目标位置 x
+        payload_target(1) = payload->target_position_.y();   // 目标位置 y
+        
+        // 计算期望线速度（朝向目标位置）
+        Eigen::Vector2d payload_to_target = payload->target_position_ - payload->position_;
+        if (payload_to_target.norm() > 0.1) {
+            Eigen::Vector2d desired_velocity = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
+            payload_target(2) = desired_velocity.x();
+            payload_target(3) = desired_velocity.y();
+        } else {
+            payload_target(2) = 0.0;
+            payload_target(3) = 0.0;
+        }
+        
+        // 计算期望角速度（朝向目标朝向）
+        double rotation_error = payload->getRotationError();
+        if (std::abs(rotation_error) > 0.01) {
+            double desired_angular_velocity = std::copysign(1.0, rotation_error) * 
+                std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), std::abs(rotation_error));
+            payload_target(4) = desired_angular_velocity;
+        } else {
+            payload_target(4) = 0.0;
+        }
+        
+        // 3. 计算 payload 的 horizon（类似 robot 的逻辑）
+        Eigen::VectorXd payload_start2target = payload_target - payload_start;
+        Eigen::VectorXd payload_horizon = payload_start + 
+            std::min(payload_start2target.norm(), 1.*globals.T_HORIZON*globals.MAX_SPEED) * 
+            payload_start2target.normalized();
+        
+        // 4. 为每个时间步创建 payload variables，使用与 robot 相同的插值逻辑
         for (int i = 0; i < num_variables_; i++) {
-            // 创建payload twist variable [vx, vy, omega] - 3DOF
-            Eigen::VectorXd payload_twist_mu = Eigen::VectorXd::Zero(3);
+            // *** 关键：使用与 robot variables 相同的插值参数 ***
+            double alpha = (double)variable_timesteps[i] / (double)variable_timesteps.back();
+            Eigen::VectorXd payload_mu = payload_start + (payload_horizon - payload_start) * alpha;
             
-            // 与robot variable类似的先验设置
-            double sigma = (i == 0 || i == num_variables_ - 1) ? globals.SIGMA_POSE_FIXED : 0.;
-            Eigen::VectorXd payload_sigma_list = Eigen::VectorXd::Constant(3, sigma);
+            // 与 robot variable 类似的先验设置
+            double sigma;
+            if (i == 0 || i == num_variables_ - 1) {
+                // 当前状态和地平线状态：使用适中的先验强度
+                sigma = 0.1;  
+            } else {
+                // 中间状态：使用较弱的先验
+                sigma = 1.0;
+            }
+            Eigen::VectorXd payload_sigma_list = Eigen::VectorXd::Constant(5, sigma);
             
             auto payload_var = std::make_shared<Variable>(
                 sim->next_vid_++, rid_, 
-                payload_twist_mu, payload_sigma_list, 
-                robot_radius_, 3  // 3DOF
+                payload_mu, payload_sigma_list, 
+                robot_radius_, 5  // 5DOF for [x, y, vx, vy, ω]
             );
             
             // 添加到robot的variables映射和payload专用容器
             variables_[payload_var->key_] = payload_var;
             payload_twist_variables_.push_back(payload_var);
+        }
+    } else {
+        // 如果没有 payload，使用零值作为后备方案
+        std::cerr << "[WARNING] No payload found for robot " << rid_ << ", using zero initialization" << std::endl;
+        
+        for (int i = 0; i < num_variables_; i++) {
+            Eigen::VectorXd payload_mu = Eigen::VectorXd::Zero(5);
+            double sigma = (i == 0 || i == num_variables_ - 1) ? 0.1 : 1.0;
+            Eigen::VectorXd payload_sigma_list = Eigen::VectorXd::Constant(5, sigma);
             
-            std::cout << "  Created payload twist variable " << i 
-                      << " with key (" << payload_var->key_.robot_id_ 
-                      << "," << payload_var->key_.node_id_ << ")" << std::endl;
+            auto payload_var = std::make_shared<Variable>(
+                sim->next_vid_++, rid_, 
+                payload_mu, payload_sigma_list, 
+                robot_radius_, 5
+            );
+            
+            variables_[payload_var->key_] = payload_var;
+            payload_twist_variables_.push_back(payload_var);
         }
     }
+}
 
     /***************************************************************************/
     /* 创建PayloadTwistFactors连接对应的robot和payload variables */
@@ -125,10 +191,10 @@ Robot::Robot(Simulator* sim,
     /***************************************************************************/
     if (globals.FORMATION == "Payload" && !payload_twist_variables_.empty()) {
         
-        for (int i = 1; i < num_variables_ - 1; i++) {
+        for (int i = 0; i < num_variables_; i++) {
             std::vector<std::shared_ptr<Variable>> variables{
                 getVar(i),                        // robot variable i (4DOF)
-                payload_twist_variables_[i]       // payload variable i (3DOF)
+                payload_twist_variables_.at(i)       // payload variable i (3DOF)
             };
             
             // 注意：几何参数需要在运行时获取，这里先用零值
@@ -143,11 +209,29 @@ Robot::Robot(Simulator* sim,
             
             // 添加到因子图
             for (auto var : factor->variables_) var->add_factor(factor);
-            factors_[factor->key_] = factor;
-            payload_twist_factors_.push_back(factor);  // 保存引用用于后续更新几何参数
+            this->factors_[factor->key_] = factor;
+            payload_twist_factors_.push_back(factor);
         }
-    }
 
+        // 检测所有变量的 outbox 中是否有空的 mu 向量（所有 PayloadTwistFactor 创建完成后）
+        bool has_empty_outbox_mu = false;
+        for (auto& [v_key, variable] : variables_) {
+            for (auto& [key, message] : variable->outbox_) {
+                if (message.mu.rows() == 0) {
+                    has_empty_outbox_mu = true;
+                    break;
+                }
+            }
+            if (has_empty_outbox_mu) break;
+        }
+        
+        if (has_empty_outbox_mu) {
+            std::cerr << "🔥 Robot " << rid_ << " has empty mu in variable outbox after all PayloadTwistFactors created!" << std::endl;
+            // 在这里设置断点 ↑
+        }
+
+    }
+    std::cout << "test" << std::endl;
 
 };
 
@@ -177,9 +261,9 @@ void Robot::cachePayloadGeometry() {
     cached_contact_normal_ = contact_normals[assigned_contact_point_index_];
     payload_geometry_cached_ = true;
     
-    std::cout << "Robot " << rid_ << " cached geometry: r=" 
-              << cached_r_vector_.transpose() << ", n=" 
-              << cached_contact_normal_.transpose() << std::endl;
+    // std::cout << "Robot " << rid_ << " cached geometry: r=" 
+    //           << cached_r_vector_.transpose() << ", n=" 
+    //           << cached_contact_normal_.transpose() << std::endl;
 }
 
 void Robot::updatePayloadFactorGeometry() {
@@ -193,9 +277,6 @@ void Robot::updatePayloadFactorGeometry() {
     for (auto factor : payload_twist_factors_) {
         factor->updateGeometry(cached_r_vector_, cached_contact_normal_);
     }
-    
-    std::cout << "Robot " << rid_ << " updated geometry for " 
-              << payload_twist_factors_.size() << " PayloadTwistFactors" << std::endl;
 }
 
 std::vector<Eigen::Vector3d> Robot::computeDesiredPayloadTwists() {
@@ -268,17 +349,6 @@ void Robot::updatePayloadTwistPriors() {
     for (int i = 0; i < payload_twist_variables_.size() && i < desired_twists.size(); i++) {
         payload_twist_variables_[i]->change_variable_prior(desired_twists[i]);
     }
-    
-    // 调试输出
-    static int debug_counter = 0;
-    if (debug_counter++ % 60 == 0) {  // 每60帧输出一次
-        std::cout << "Robot " << rid_ << " updated " << payload_twist_variables_.size() 
-                  << " payload twist priors" << std::endl;
-        if (!desired_twists.empty()) {
-            std::cout << "  Current: [" << desired_twists[0].transpose() << "]" << std::endl;
-            std::cout << "  Target:  [" << desired_twists.back().transpose() << "]" << std::endl;
-        }
-    }
 }
 
 // Robot.cpp 中的正确实现
@@ -312,93 +382,18 @@ void Robot::attachToPayload(std::shared_ptr<Payload> payload, const Eigen::Vecto
     // 创建关节
     payload_joint_ = (b2WeldJoint*)physicsWorld_->CreateJoint(&jointDef);
     
-    std::cout << "Robot " << rid_ << " attached to payload at (" 
-              << attach_point.x() << ", " << attach_point.y() << ")" << std::endl;
+    // std::cout << "Robot " << rid_ << " attached to payload at (" 
+    //           << attach_point.x() << ", " << attach_point.y() << ")" << std::endl;
 }
 
 void Robot::detachFromPayload() {
     if (payload_joint_ && physicsWorld_) {
         physicsWorld_->DestroyJoint(payload_joint_);
         payload_joint_ = nullptr;
-        std::cout << "Robot " << rid_ << " detached from payload" << std::endl;
+        // std::cout << "Robot " << rid_ << " detached from payload" << std::endl;
     }
 }
 
-void Robot::updatePayloadFactors(const std::map<int, std::shared_ptr<Payload>>& payloads) {
-    // 简化：所有机器人都应该与payload交互，不需要距离判断
-    for (auto& [pid, payload] : payloads) {
-        bool is_connected = std::find(connected_payload_ids_.begin(), connected_payload_ids_.end(), pid) 
-                           != connected_payload_ids_.end();
-        
-        if (!is_connected) {
-            // *** 注释掉旧的因子创建 ***
-            // createPayloadFactors(payload);  // 包含 ContactFactor 和 PayloadVelocityFactor
-            
-            // *** 只使用新的 PayloadTwistFactor ***
-            createPayloadTwistFactors(payload);
-            
-            // 标记为已连接
-            connected_payload_ids_.push_back(pid);
-        }
-    }
-    
-    // 检查是否有payload被删除
-    for (auto it = connected_payload_ids_.begin(); it != connected_payload_ids_.end();) {
-        int pid = *it;
-        if (payloads.find(pid) == payloads.end()) {
-            // payload不存在，需要删除相关因子
-            // deletePayloadFactors(pid);  // *** 注释掉旧的删除方法 ***
-            deletePayloadTwistFactors(pid);  // 只删除 twist 因子
-            it = connected_payload_ids_.erase(it);
-        } else {
-            ++it;
-        }
-    }
-}
-
-void Robot::createPayloadTwistFactors(std::shared_ptr<Payload> payload) {
-    auto twist_variable = sim_->getPayloadTwistVariable(payload->payload_id_);
-    if (!twist_variable) {
-        std::cout << "Warning: No twist variable found for payload " << payload->payload_id_ << std::endl;
-        return;
-    }
-    
-    // 一次性获取几何信息
-    auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
-    if (assigned_contact_point_index_ >= contact_points.size()) {
-        std::cout << "Warning: Invalid contact point index for robot " << rid_ << std::endl;
-        return;
-    }
-    
-    // *** 计算几何参数（值拷贝，避免后续访问 payload）***
-    Eigen::Vector2d contact_point = contact_points[assigned_contact_point_index_];
-    Eigen::Vector2d contact_normal = contact_normals[assigned_contact_point_index_];
-    Eigen::Vector2d payload_center = payload->getPosition();
-    Eigen::Vector2d r_vector = contact_point - payload_center;
-    
-    // 为每个规划变量创建因子
-    for (int i = 1; i < num_variables_; i++) {
-        std::vector<std::shared_ptr<Variable>> variables{
-            getVar(i),           // robot variable
-            twist_variable       // payload twist variable (共享)
-        };
-        
-        // *** 使用新的优化构造函数，传递几何参数而非指针 ***
-        auto factor = std::make_shared<PayloadTwistFactor>(
-            sim_->next_fid_++, rid_, variables,
-            globals.SIGMA_FACTOR_PAYLOAD_TWIST,
-            Eigen::VectorXd::Zero(2),  // 测量向量（期望残差为0）
-            r_vector,                  // 力臂向量（值拷贝）
-            contact_normal             // 法向量（值拷贝）
-        );
-        
-        // 添加到因子图
-        for (auto var : factor->variables_) var->add_factor(factor);
-        this->factors_[factor->key_] = factor;
-    }
-    
-    std::cout << "Robot " << rid_ << " created optimized PayloadTwistFactors (linear, distributed)" << std::endl;
-}
 
 void Robot::deletePayloadTwistFactors(int payload_id) {
     std::vector<Key> factors_to_delete{};
@@ -421,8 +416,8 @@ void Robot::deletePayloadTwistFactors(int payload_id) {
         this->factors_.erase(f_key);
     }
     
-    std::cout << "Deleted " << factors_to_delete.size() 
-              << " PayloadTwistFactors for payload " << payload_id << std::endl;
+    // std::cout << "Deleted " << factors_to_delete.size() 
+    //           << " PayloadTwistFactors for payload " << payload_id << std::endl;
 }
 
 bool Robot::isConnectedToPayload(int payload_id) const {
@@ -509,16 +504,85 @@ void Robot::syncPhysicsToLogical(){
 /***************************************************************************************************/
 /* Change the prior of the Horizon state */
 /***************************************************************************************************/
-void Robot::updateHorizon(){
-    // Horizon state moves towards the next waypoint.
-    // The Horizon state's velocity is capped at MAX_SPEED
-    auto horizon = getVar(-1);      // get horizon state variable
-    Eigen::VectorXd dist_horz_to_goal = waypoints_.front()({0,1}) - horizon->mu_({0,1});                        
-    Eigen::VectorXd new_vel = dist_horz_to_goal.normalized() * std::min((double)globals.MAX_SPEED, dist_horz_to_goal.norm());
-    Eigen::VectorXd new_pos = horizon->mu_({0,1}) + new_vel*globals.TIMESTEP;
+// void Robot::updateHorizon(){
+//     // Horizon state moves towards the next waypoint.
+//     // The Horizon state's velocity is capped at MAX_SPEED
+//     auto horizon = getVar(14);      // get horizon state variable
+//     Eigen::VectorXd dist_horz_to_goal = waypoints_.front()({0,1}) - horizon->mu_({0,1});                        
+//     Eigen::VectorXd new_vel = dist_horz_to_goal.normalized() * std::min((double)globals.MAX_SPEED, dist_horz_to_goal.norm());
+//     Eigen::VectorXd new_pos = horizon->mu_({0,1}) + new_vel*globals.TIMESTEP;
 
-    horizon->mu_ << new_pos, new_vel;
-    horizon->change_variable_prior(horizon->mu_);
+//     horizon->mu_ << new_pos, new_vel;
+//     horizon->change_variable_prior(horizon->mu_);
+
+//     // If the horizon has reached the waypoint, pop that waypoint from the waypoints.
+//     // Could add other waypoint behaviours here (maybe they might move, or change randomly).
+//     if (dist_horz_to_goal.norm() < robot_radius_){
+//         if (waypoints_.size()>1) waypoints_.pop_front();
+//     }
+// }
+
+void Robot::updateHorizon(){
+    // ========== 更新 Robot Variable Horizon ==========
+    // 注意：现在需要明确获取 robot horizon (第14个变量，而不是最后一个)
+    auto robot_horizon = getVar(num_variables_ - 1);  // robot variables 的最后一个
+    Eigen::VectorXd dist_horz_to_goal = waypoints_.front()({0,1}) - robot_horizon->mu_({0,1});                        
+    Eigen::VectorXd new_vel = dist_horz_to_goal.normalized() * std::min((double)globals.MAX_SPEED, dist_horz_to_goal.norm());
+    Eigen::VectorXd new_pos = robot_horizon->mu_({0,1}) + new_vel*globals.TIMESTEP;
+
+    robot_horizon->mu_ << new_pos, new_vel;
+    robot_horizon->change_variable_prior(robot_horizon->mu_);
+
+    // ========== 更新 Payload Variable Horizon ==========
+    if (globals.FORMATION == "Payload" && !payload_twist_variables_.empty() && !sim_->payloads_.empty()) {
+        auto payload = sim_->payloads_.begin()->second;
+        auto payload_horizon = payload_twist_variables_.back();  // payload variables 的最后一个
+        
+        // 计算 payload 的期望状态
+        Eigen::VectorXd payload_new_mu(5);
+        
+        // 1. 计算期望位置（朝向目标位置移动）
+        Eigen::Vector2d payload_to_target = payload->target_position_ - payload->getPosition();
+        Eigen::Vector2d payload_new_pos;
+        
+        if (payload_to_target.norm() > 0.1) {
+            // 朝向目标移动
+            Eigen::Vector2d payload_vel_dir = payload_to_target.normalized();
+            double payload_move_distance = std::min((double)globals.MAX_SPEED * globals.TIMESTEP, 
+                                                   payload_to_target.norm());
+            payload_new_pos = payload->getPosition() + payload_vel_dir * payload_move_distance;
+        } else {
+            // 已经接近目标，保持当前位置
+            payload_new_pos = payload->target_position_;
+        }
+        
+        // 2. 计算期望速度
+        Eigen::Vector2d payload_new_vel;
+        if (payload_to_target.norm() > 0.1) {
+            payload_new_vel = payload_to_target.normalized() * 
+                std::min((double)globals.MAX_SPEED * 0.5, payload_to_target.norm() / globals.TIMESTEP);
+        } else {
+            payload_new_vel = Eigen::Vector2d::Zero();
+        }
+        
+        // 3. 计算期望角速度
+        double payload_new_omega = 0.0;
+        double rotation_error = payload->getRotationError();
+        if (std::abs(rotation_error) > 0.01) {
+            payload_new_omega = std::copysign(1.0, rotation_error) * 
+                std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), 
+                        std::abs(rotation_error) / globals.TIMESTEP);
+        }
+        
+        // 4. 组装新的 payload horizon 状态 [x, y, vx, vy, ω]
+        payload_new_mu << payload_new_pos.x(), payload_new_pos.y(), 
+                         payload_new_vel.x(), payload_new_vel.y(), 
+                         payload_new_omega;
+        
+        // 5. 更新 payload horizon variable
+        payload_horizon->mu_ = payload_new_mu;
+        payload_horizon->change_variable_prior(payload_horizon->mu_);
+    }
 
     // If the horizon has reached the waypoint, pop that waypoint from the waypoints.
     // Could add other waypoint behaviours here (maybe they might move, or change randomly).
@@ -654,9 +718,9 @@ void Robot::drawVelocityVector() {
     // 绘制当前速度向量（绿色）
     if (current_velocity.norm() > min_velocity_threshold) {
         Vector3 current_vel_end = {
-            robot_pos.x + current_velocity.x() * velocity_scale,
+            robot_pos.x + static_cast<float>(current_velocity.x() * velocity_scale),
             robot_pos.y,
-            robot_pos.z + current_velocity.y() * velocity_scale
+            robot_pos.z + static_cast<float>(current_velocity.y() * velocity_scale)
         };
         
         // 绘制速度箭头
@@ -673,9 +737,9 @@ void Robot::drawVelocityVector() {
     // 绘制期望速度向量（蓝色）
     if (desired_velocity.norm() > min_velocity_threshold) {
         Vector3 desired_vel_end = {
-            robot_pos.x + desired_velocity.x() * velocity_scale,
+            robot_pos.x + static_cast<float>(desired_velocity.x() * velocity_scale),
             robot_pos.y + 0.2f, // 稍微偏移避免重叠
-            robot_pos.z + desired_velocity.y() * velocity_scale
+            robot_pos.z + static_cast<float>(desired_velocity.y() * velocity_scale)
         };
         
         // 绘制期望速度箭头
@@ -687,9 +751,9 @@ void Robot::drawVelocityVector() {
     Eigen::Vector2d velocity_error = desired_velocity - current_velocity;
     if (velocity_error.norm() > min_velocity_threshold) {
         Vector3 error_end = {
-            robot_pos.x + velocity_error.x() * velocity_scale,
+            robot_pos.x + static_cast<float>(velocity_error.x() * velocity_scale),
             robot_pos.y - 0.2f, // 向下偏移
-            robot_pos.z + velocity_error.y() * velocity_scale
+            robot_pos.z + static_cast<float>(velocity_error.y() * velocity_scale)
         };
         
         DrawLine3D(robot_pos, error_end, RED);

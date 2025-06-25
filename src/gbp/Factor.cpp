@@ -109,7 +109,7 @@ bool Factor::update_factor() {
         n_dofs = variables_[v]->n_dofs_;
 
         if (inbox_.count(var_key) == 0) {
-            std::cerr << "[ERROR] Factor::update_factor: inbox_ missing key for variable at index " << v << std::endl;
+            std::cerr << "[ERROR] Factor::update_factor: inbox_ missing key for variable " << v << std::endl;
             return false;
         }
 
@@ -118,6 +118,41 @@ bool Factor::update_factor() {
         if (mu_belief.size() != n_dofs) {
             std::cerr << "[ERROR] update_factor: mu_belief.size() = " << mu_belief.size()
                       << " != n_dofs = " << n_dofs << " for variable index " << v << std::endl;
+            
+            // *** 详细诊断信息 ***
+            std::cerr << "[DIAGNOSTIC] Factor " << f_id_ << " details:" << std::endl;
+            std::cerr << "  Factor type: " << factor_type_ << std::endl;
+            std::cerr << "  Factor robot_id: " << r_id_ << std::endl;
+            std::cerr << "  Factor key: (" << key_.robot_id_ << "," << key_.node_id_ << ")" << std::endl;
+            std::cerr << "  Total variables: " << variables_.size() << std::endl;
+            std::cerr << "  Factor X_.size(): " << X_.size() << std::endl;
+            std::cerr << "  Factor n_dofs_: " << n_dofs_ << std::endl;
+            
+            for (int i = 0; i < variables_.size(); i++) {
+                auto var = variables_[i];
+                std::cerr << "    Variable[" << i << "]:" << std::endl;
+                std::cerr << "      key: (" << var->key_.robot_id_ << "," << var->key_.node_id_ << ")" << std::endl;
+                std::cerr << "      n_dofs: " << var->n_dofs_ << std::endl;
+
+                std::cerr << "      variable inbox messages:" << std::endl;
+                for (auto& [msg_key, message] : inbox_) {
+                    std::cerr << "        message from (" << msg_key.robot_id_ << "," << msg_key.node_id_ << "):" << std::endl;
+                    std::cerr << "          mu.size(): " << message.mu.size() << std::endl;
+                    std::cerr << "          eta.size(): " << message.eta.size() << std::endl;
+                    std::cerr << "          lambda.size(): " << message.lambda.rows() << "x" << message.lambda.cols() << std::endl;
+                }
+                // // 检查inbox中的消息
+                // if (inbox_.count(var->key_) > 0) {
+                    auto& [eta_in, lam_in, mu_in] = inbox_.at(var->key_);
+
+                
+                // 检查variable的因子连接
+                std::cerr << "      connected_factors: " << var->factors_.size() << std::endl;
+                for (auto& [fkey, fac] : var->factors_) {
+                    std::cerr << "        factor(" << fkey.robot_id_ << "," << fkey.node_id_ << ") type=" << fac->factor_type_ << std::endl;
+                }
+            }
+            
             return false;
         }
 
@@ -242,10 +277,11 @@ PayloadTwistFactor::PayloadTwistFactor(int f_id, int r_id,
     if (r_.norm() > 1e-6 && contact_normal_.norm() > 1e-6) {
         precomputeGeometry();
         precomputeJacobian();
-    } else {
-        std::cout << "PayloadTwistFactor " << f_id_ 
-                  << " created with zero geometry (will be updated later)" << std::endl;
-    }
+    } 
+    // else {
+    //     std::cout << "PayloadTwistFactor " << f_id_ 
+    //               << " created with zero geometry (will be updated later)" << std::endl;
+    // }
 }
 
 void PayloadTwistFactor::updateGeometry(const Eigen::Vector2d& r_vector, 
@@ -257,9 +293,6 @@ void PayloadTwistFactor::updateGeometry(const Eigen::Vector2d& r_vector,
     // 重新计算几何量和雅可比
     precomputeGeometry();
     precomputeJacobian();
-    
-    std::cout << "PayloadTwistFactor " << f_id_ << " updated geometry: r=" 
-              << r_.transpose() << ", n=" << contact_normal_.transpose() << std::endl;
 }
 
 // 测量函数实现
@@ -331,289 +364,6 @@ void PayloadTwistFactor::precomputeJacobian() {
     J_(1, 6) = t_dot_r_perp;          // ∂h₁/∂ω
 }
 
-// 在文件末尾添加ContactFactor实现
-// ContactFactor::ContactFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
-//                              float sigma, const Eigen::VectorXd& measurement,
-//                              std::shared_ptr<Payload> payload,
-//                              Eigen::Vector2d target_contact_point,
-//                              Simulator* sim)
-//     : Factor{f_id, r_id, variables, sigma, measurement},
-//       payload_(payload), target_contact_point_(target_contact_point), sim_(sim) {
-//     factor_type_ = CONTACT_FACTOR;
-//     this->delta_jac = 1e-3;
-// }
-
-// Eigen::MatrixXd ContactFactor::h_func_(const Eigen::VectorXd& X) {
-//     Eigen::Vector2d robot_pos = X.head(2);
-//     double contact_error = computeContactError(robot_pos);
-    
-//     Eigen::MatrixXd h(1, 1);
-//     h(0, 0) = contact_error;
-//     return h;
-// }
-
-// double ContactFactor::computeContactError(const Eigen::Vector2d& robot_pos) {
-//     Eigen::Vector2d world_target_contact = payloadToWorld(target_contact_point_);
-//     double distance_to_target = (robot_pos - world_target_contact).norm();
-//     return distance_to_target - globals.ROBOT_RADIUS;
-// }
-
-// Eigen::Vector2d ContactFactor::payloadToWorld(const Eigen::Vector2d& local_point) {
-//     Eigen::Vector2d payload_pos = payload_->getPosition();
-//     double rotation = payload_->rotation_;
-    
-//     Eigen::Matrix2d rot;
-//     rot << cos(rotation), -sin(rotation),
-//            sin(rotation),  cos(rotation);
-    
-//     return payload_pos + rot * local_point;
-// }
-
-// bool ContactFactor::skip_factor() {
-//     return false; // 与dynamics factor生命周期一致
-// }
-
-// void ContactFactor::draw() {
-//     if (globals.DRAW_PATH) {
-//         Eigen::Vector2d world_target = payloadToWorld(target_contact_point_);
-//         Vector3 target_pos = {(float)world_target.x(), 1.0f, (float)world_target.y()};
-//         DrawSphere(target_pos, 0.3f, PURPLE);
-        
-//         if (!variables_.empty() && variables_[0]->valid_) {
-//             Vector3 robot_pos = {(float)variables_[0]->mu_(0), 1.0f, (float)variables_[0]->mu_(1)};
-//             double error = computeContactError(variables_[0]->mu_.head(2));
-//             Color line_color = (abs(error) < 0.1) ? GREEN : RED;
-//             DrawLine3D(robot_pos, target_pos, line_color);
-//         }
-//     }
-// }
-
-// // PayloadVelocityFactor实现
-// PayloadVelocityFactor::PayloadVelocityFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
-//                                              float sigma, const Eigen::VectorXd& measurement,
-//                                              std::shared_ptr<Payload> payload,
-//                                              Eigen::Vector2d contact_normal)
-//     : Factor{f_id, r_id, variables, sigma, measurement},
-//       payload_(payload), contact_normal_(contact_normal) {
-//     factor_type_ = PAYLOAD_VELOCITY_FACTOR;
-//     this->delta_jac = 1e-3;
-// }
-
-// Eigen::MatrixXd PayloadVelocityFactor::h_func_(const Eigen::VectorXd& X) {
-//     Eigen::Vector2d robot_pos = X.head(2);
-//     Eigen::Vector2d robot_velocity = X.tail(2);
-    
-//     auto [desired_linear_vel, desired_angular_vel] = computeDesiredPayloadMotion();
-//     auto [linear_contribution, angular_contribution] = computeRobotContribution(robot_pos, robot_velocity);
-    
-//     Eigen::MatrixXd h(2, 1);
-//     h(0, 0) = linear_contribution - desired_linear_vel;
-//     h(1, 0) = angular_contribution - desired_angular_vel;
-    
-//     return h;
-// }
-
-// std::pair<double, double> PayloadVelocityFactor::computeDesiredPayloadMotion() {
-//     if (!payload_) return {0.0, 0.0};
-    
-//     // 线速度分量
-//     Eigen::Vector2d payload_to_target = payload_->target_position_ - payload_->position_;
-//     double desired_linear_velocity_component = 0.0;
-    
-//     if (payload_to_target.norm() > 0.1) {
-//         Eigen::Vector2d desired_velocity = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
-//         desired_linear_velocity_component = desired_velocity.dot(contact_normal_);
-//     }
-    
-//     // 角速度（如果有目标朝向）
-//     double desired_angular_velocity = 0.0;
-//     // 这里可以根据需要添加旋转控制逻辑
-    
-//     return {desired_linear_velocity_component, desired_angular_velocity};
-// }
-
-// std::pair<double, double> PayloadVelocityFactor::computeDesiredPayloadMotion() {
-//     if (!payload_) return {0.0, 0.0};
-    
-//     // 线速度分量（保持现有逻辑）
-//     Eigen::Vector2d payload_to_target = payload_->target_position_ - payload_->position_;
-//     double desired_linear_velocity_component = 0.0;
-    
-//     if (payload_to_target.norm() > 0.1) {
-//         Eigen::Vector2d desired_velocity = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
-//         desired_linear_velocity_component = desired_velocity.dot(contact_normal_);
-//     }
-    
-//     // 角速度（使用修复后的旋转误差计算）
-//     double desired_angular_velocity = 0.0;
-//     double rotation_error = payload_->getRotationError();
-    
-//     if (std::abs(rotation_error) > 0.01) {  // 只有当旋转误差显著时才施加角速度
-//         desired_angular_velocity = std::copysign(1.0, rotation_error) * 
-//             std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), std::abs(rotation_error));
-        
-//         // 调试输出
-//         static int debug_counter = 0;
-//         if (debug_counter++ % 60 == 0) {
-//             std::cout << "Rotation error: " << rotation_error << " rad, desired angular vel: " 
-//                       << desired_angular_velocity << std::endl;
-//         }
-//     }
-    
-//     return {desired_linear_velocity_component, desired_angular_velocity};
-// }
-
-// std::pair<double, double> PayloadVelocityFactor::computeDesiredPayloadMotion() {
-//     if (!payload_) return {0.0, 0.0};
-    
-//     // 线速度分量
-//     Eigen::Vector2d payload_to_target = payload_->target_position_ - payload_->position_;
-//     double desired_linear_velocity_component = 0.0;
-    
-//     if (payload_to_target.norm() > 0.1) {
-//         Eigen::Vector2d desired_velocity = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
-        
-//         if (globals.USE_RIGID_ATTACHMENT) {
-//             // 刚性连接模式：机器人应该直接匹配payload的期望速度
-//             // 这里返回期望速度的大小作为目标
-//             desired_linear_velocity_component = desired_velocity.norm();
-//         } else {
-//             // 非刚性连接模式：使用法向量投影
-//             desired_linear_velocity_component = desired_velocity.dot(contact_normal_);
-//         }
-//     }
-    
-//     // 角速度计算保持不变
-//     double desired_angular_velocity = 0.0;
-//     double rotation_error = payload_->getRotationError();
-    
-//     if (std::abs(rotation_error) > 0.01) {
-//         desired_angular_velocity = std::copysign(1.0, rotation_error) * 
-//             std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), std::abs(rotation_error));
-        
-//         // 调试输出
-//         static int debug_counter = 0;
-//         if (debug_counter++ % 60 == 0) {
-//             std::cout << "Rigid attachment mode: " << globals.USE_RIGID_ATTACHMENT 
-//                       << ", Rotation error: " << rotation_error << " rad, desired angular vel: " 
-//                       << desired_angular_velocity << std::endl;
-//         }
-//     }
-    
-//     return {desired_linear_velocity_component, desired_angular_velocity};
-// }
-
-// std::pair<double, double> PayloadVelocityFactor::computeRobotContribution(
-//     const Eigen::Vector2d& robot_pos, const Eigen::Vector2d& robot_velocity) {
-    
-//     double linear_contribution = robot_velocity.dot(contact_normal_);
-//     double angular_contribution = 0.0;
-    
-//     if (payload_) {
-//         Eigen::Vector2d payload_center = payload_->getPosition();
-//         Eigen::Vector2d contact_point = robot_pos - globals.ROBOT_RADIUS * contact_normal_;
-//         Eigen::Vector2d r = contact_point - payload_center;
-        
-//         double torque_arm = std::abs(r.x() * contact_normal_.y() - r.y() * contact_normal_.x());
-//         angular_contribution = torque_arm * linear_contribution;
-        
-//         double payload_inertia_approx = payload_->getMomentOfInertia();
-//         if (payload_inertia_approx > 1e-6) {
-//             angular_contribution /= payload_inertia_approx;
-//         }
-//     }
-    
-//     return {linear_contribution, angular_contribution};
-// }
-
-// std::pair<double, double> PayloadVelocityFactor::computeRobotContribution(
-//     const Eigen::Vector2d& robot_pos, const Eigen::Vector2d& robot_velocity) {
-    
-//     double linear_contribution = 0.0;
-//     double angular_contribution = 0.0;
-    
-//     if (!payload_) return {linear_contribution, angular_contribution};
-    
-//     // 检查是否使用刚性连接
-//     if (globals.USE_RIGID_ATTACHMENT) {
-//         // 刚性连接模式：机器人和payload形成刚体系统
-        
-//         // 线速度贡献：机器人速度应该直接匹配payload期望速度
-//         Eigen::Vector2d payload_to_target = payload_->target_position_ - payload_->position_;
-//         if (payload_to_target.norm() > 0.1) {
-//             Eigen::Vector2d desired_payload_velocity = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
-            
-//             // 在刚性连接下，机器人的期望速度就是payload的期望速度
-//             // 线速度贡献是机器人当前速度与payload期望速度的差
-//             linear_contribution = (robot_velocity - desired_payload_velocity).norm();
-//         }
-        
-//         // 角速度贡献：通过连接点的力矩计算
-//         Eigen::Vector2d payload_center = payload_->getPosition();
-        
-//         // 机器人实际连接点位置（从Box2D获取）
-//         Eigen::Vector2d connection_point = robot_pos; // 简化：假设机器人中心就是连接点
-        
-//         // 从连接点到payload质心的向量
-//         Eigen::Vector2d r = connection_point - payload_center;
-        
-//         // 计算期望的payload角速度
-//         double desired_payload_angular_velocity = 0.0;
-//         double rotation_error = payload_->getRotationError();
-//         if (std::abs(rotation_error) > 0.01) {
-//             desired_payload_angular_velocity = std::copysign(1.0, rotation_error) * 
-//                 std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), std::abs(rotation_error));
-//         }
-        
-//         // 在刚性连接下，机器人在连接点的期望线速度应该满足：
-//         // v_robot = v_payload_center + ω_payload × r
-//         Eigen::Vector2d current_payload_velocity = payload_->getVelocity();
-//         double current_payload_angular_velocity = payload_->getAngularVelocity();
-        
-//         // 计算机器人在连接点应该有的速度
-//         Eigen::Vector2d perpendicular_r(-r.y(), r.x()); // r的垂直向量
-//         Eigen::Vector2d desired_robot_velocity = current_payload_velocity + 
-//                                                  current_payload_angular_velocity * perpendicular_r;
-        
-//         // 角速度贡献：机器人当前速度与期望速度的差产生的力矩
-//         Eigen::Vector2d velocity_error = robot_velocity - desired_robot_velocity;
-//         double torque_from_velocity_error = r.x() * velocity_error.y() - r.y() * velocity_error.x();
-        
-//         double payload_inertia = payload_->getMomentOfInertia();
-//         if (payload_inertia > 1e-6) {
-//             angular_contribution = torque_from_velocity_error / payload_inertia;
-//         }
-        
-//     } else {
-//         // 非刚性连接模式：使用原有的法向量投影方法
-//         linear_contribution = robot_velocity.dot(contact_normal_);
-        
-//         if (payload_) {
-//             Eigen::Vector2d payload_center = payload_->getPosition();
-//             Eigen::Vector2d contact_point = robot_pos - globals.ROBOT_RADIUS * contact_normal_;
-//             Eigen::Vector2d r = contact_point - payload_center;
-            
-//             double torque_arm = std::abs(r.x() * contact_normal_.y() - r.y() * contact_normal_.x());
-//             angular_contribution = torque_arm * linear_contribution;
-            
-//             double payload_inertia_approx = payload_->getMomentOfInertia();
-//             if (payload_inertia_approx > 1e-6) {
-//                 angular_contribution /= payload_inertia_approx;
-//             }
-//         }
-//     }
-    
-//     return {linear_contribution, angular_contribution};
-// }
-
-// bool PayloadVelocityFactor::skip_factor() {
-//     if (payload_) {
-//         double distance_to_target = (payload_->target_position_ - payload_->position_).norm();
-//         return distance_to_target < 0.5;
-//     }
-//     return false;
-// }
-
 /********************************************************************************************/
 /* Dynamics factor: constant-velocity model */
 /*****************************************************************************************************/
@@ -653,16 +403,7 @@ Eigen::MatrixXd DynamicsFactor::J_func_(const Eigen::VectorXd& X){
 // position at the same timestep (collision). This factor is created between variables of two robots.
 // The factor has 0 energy if the variables are further away than the safety distance. skip_ = true in this case.
 /********************************************************************************************/
-// PayloadFactor::PayloadFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
-//     float sigma, const Eigen::VectorXd& measurement,
-//     float robot_radius)
-//     : Factor{f_id, r_id, variables, sigma, measurement} {
-//         factor_type_ = PAYLOAD_FACTOR;
-//         // Change the parameters below:
-//         float eps = 0.2 * robot_radius;
-//         this->safety_distance_ = 2*robot_radius + eps; // Safety distance between two robots
-//         this->delta_jac = 1e-2;
-//     };
+
 
 InterrobotFactor::InterrobotFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
     float sigma, const Eigen::VectorXd& measurement, 
