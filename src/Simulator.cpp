@@ -662,67 +662,18 @@ double Simulator::computeDesiredPayloadAngularVelocity(std::shared_ptr<Payload> 
 void Simulator::timestep() {
     if (globals.SIM_MODE != Timestep) return;
     
-    // ========== 1. 控制方法选择 ==========
-    // 根据配置选择不同的payload控制方法
-    if (globals.USE_FORCE_ALLOCATION && globals.FORMATION == "Payload") {
-        // 基于因子图的力分配控制
-        updateForceAllocationSystem();
-        
-        // 计算接触点几何参数（如果需要）
-        for (auto [r_id, robot] : robots_) {
-            robot->updateContactForceGeometry();
-        }
-        
-    } else if (globals.USE_DIRECT_PAYLOAD_VELOCITY) {
-        // 直接速度控制（绕过因子图）
-        applyDirectPayloadVelocityControl();
-        
-    } else if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
-        // 使用PayloadTwistFactor的分布式控制
-        updateDistributedPayloadControl();
-        
-    } else {
-        // 默认：集中式最小二乘力分配
-        computeLeastSquares();
-    }
-    
-    // ========== 2. 机器人邻居关系计算 ==========
+    // ========== 1. 机器人邻居关系计算 ==========
     calculateRobotNeighbours(robots_);
     
-    // ========== 3. 因子几何参数更新（一次性设置）==========
-    static bool geometry_updated = false;
-    if ((globals.USE_DISTRIBUTED_PAYLOAD_CONTROL || globals.USE_FORCE_ALLOCATION) && 
-        !globals.USE_DIRECT_PAYLOAD_VELOCITY && !geometry_updated) {
-        
-        for (auto [r_id, robot] : robots_) {
-            // 更新PayloadTwistFactor几何参数
-            if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
-                robot->updatePayloadFactorGeometry();
-            }
-            
-            // 更新ForceAllocationFactor几何参数
-            if (globals.USE_FORCE_ALLOCATION) {
-                robot->updateContactForceGeometry();
-            }
-        }
-        geometry_updated = true;
-        std::cout << "Factor geometry parameters updated" << std::endl;
-    }
-    
-    // ========== 4. 因子图连接更新 ==========
+    // ========== 2. 因子图连接更新 ==========
     if ((globals.USE_DISTRIBUTED_PAYLOAD_CONTROL || globals.USE_FORCE_ALLOCATION) && 
         !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
-        
         for (auto [r_id, robot] : robots_) {
-            // 更新机器人间因子（避免碰撞等）
             robot->updateInterrobotFactors();
-            
-            // 如果使用力分配，可能需要更新力分配相关的连接
-            // （通常ForceAllocationFactor在创建时就建立了所有必要连接）
         }
     }
     
-    // ========== 5. 通信故障模拟 ==========
+    // ========== 3. 通信故障模拟 ==========
     setCommsFailure(globals.COMMS_FAILURE_RATE);
     
     // ========== 6. 因子图优化（GBP迭代）==========
@@ -731,121 +682,20 @@ void Simulator::timestep() {
         
         // 执行多轮GBP迭代
         for (int i = 0; i < globals.NUM_ITERS; i++) {
-            // 内部迭代：机器人内部的变量和因子
             iterateGBP(1, INTERNAL, robots_);
-            
-            // 外部迭代：机器人间的协调因子
             iterateGBP(1, EXTERNAL, robots_);
         }
         
         // ========== 7. 机器人状态更新 ==========
         for (auto [r_id, robot] : robots_) {
-            // 更新地平线状态（目标导向）
             robot->updateHorizon();
-            
-            // 更新当前状态（执行计划的第一步）
             robot->updateCurrent();
         }
-        
-        // 可选：更新payload变量的先验（如果使用PayloadTwistFactor）
-        if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
-            for (auto [r_id, robot] : robots_) {
-                robot->updatePayloadTwistPriors();
-            }
-        }
     }
     
-    // ========== 8. MUJOCO物理世界更新 ==========
-    stepMuJoCo();  // MuJoCo物理步进
-    
-    // 同步物理状态到逻辑状态
-    for (auto [r_id, robot] : robots_) {
-        robot->syncPhysicsToLogical();  // 内部调用syncFromMuJoCo()
-    }
-    
-    // 更新payload状态
-    for (auto [p_id, payload] : payloads_) {
-        payload->update();  // 内部调用syncFromMuJoCo()
-    }
-    
-    // ========== 9. 调试信息输出 ==========
-    static int debug_counter = 0;
-    if (debug_counter++ % 120 == 0) {  // 每2秒输出一次
-        std::cout << "\n=== Timestep " << clock_ << " Debug Info ===" << std::endl;
-        
-        if (globals.USE_FORCE_ALLOCATION && !payloads_.empty()) {
-            // 输出力分配信息
-            auto payload = payloads_.begin()->second;
-            std::cout << "Payload position: (" << payload->getPosition().transpose() << ")" << std::endl;
-            std::cout << "Target position: (" << payload->target_position_.transpose() << ")" << std::endl;
-            
-            // 输出各机器人的接触力
-            for (auto [r_id, robot] : robots_) {
-                if (!robot->contact_force_variables_.empty()) {
-                    double contact_force = robot->contact_force_variables_[0]->mu_(0);
-                    std::cout << "Robot " << r_id << " contact force: " << contact_force << std::endl;
-                }
-            }
-        }
-        
-        if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
-            // 输出payload twist信息
-            for (auto [r_id, robot] : robots_) {
-                if (!robot->payload_twist_variables_.empty()) {
-                    auto twist_var = robot->payload_twist_variables_[0];
-                    std::cout << "Robot " << r_id << " payload twist: [" 
-                              << twist_var->mu_.transpose() << "]" << std::endl;
-                }
-            }
-        }
-        
-        std::cout << "Control mode: ";
-        if (globals.USE_FORCE_ALLOCATION) std::cout << "Force Allocation";
-        else if (globals.USE_DIRECT_PAYLOAD_VELOCITY) std::cout << "Direct Velocity";
-        else if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) std::cout << "Distributed Twist";
-        else std::cout << "Centralized Least Squares";
-        std::cout << std::endl;
-        
-        // 输出当前使用的物理引擎
-        std::cout << "Physics engine: MuJoCo" << std::endl;
-    }
-    
-    // ========== 10. 任务完成检查 ==========
-    if (globals.FORMATION == "Payload" && !payloads_.empty()) {
-        auto payload = payloads_.begin()->second;
-        
-        // 检查是否到达目标
-        Eigen::Vector2d position_error = payload->target_position_ - payload->position_;
-        double rotation_error = std::abs(payload->getRotationError());
-        
-        if (position_error.norm() < 0.5 && rotation_error < 0.1) {
-            payload->task_completed_ = true;
-            
-            static bool completion_logged = false;
-            if (!completion_logged) {
-                std::cout << "\n🎉 Payload manipulation task completed! 🎉" << std::endl;
-                std::cout << "Final position error: " << position_error.norm() << std::endl;
-                std::cout << "Final rotation error: " << rotation_error << " rad" << std::endl;
-                completion_logged = true;
-            }
-        }
-    }
-    
-    // ========== 11. 时间推进和终止条件 ==========
     clock_++;
-    
     if (clock_ >= globals.MAX_TIME) {
-        std::cout << "\nSimulation completed after " << globals.MAX_TIME << " timesteps." << std::endl;
         globals.RUN = false;
-    }
-    
-    // 可选：基于任务完成情况的早期终止
-    if (globals.FORMATION == "Payload" && !payloads_.empty()) {
-        auto payload = payloads_.begin()->second;
-        if (payload->task_completed_ && clock_ > 100) {  // 至少运行100步
-            std::cout << "\nTask completed! Ending simulation early." << std::endl;
-            globals.RUN = false;
-        }
     }
 }
 

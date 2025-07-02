@@ -251,83 +251,22 @@ Message Factor::marginalise_factor_dist(const Eigen::VectorXd &eta, const Eigen:
 };    
 
 
-ForceAllocationFactor::ForceAllocationFactor(int f_id, int r_id, 
+ForceAllocationFactor::ForceAllocationFactor(Simulator* sim, int f_id, int r_id, 
                                            std::vector<std::shared_ptr<Variable>> variables,
-                                           float sigma, const Eigen::VectorXd& measurement,
-                                           const std::vector<Eigen::Vector2d>& contact_points,
-                                           const std::vector<Eigen::Vector2d>& contact_normals)
-    : Factor{f_id, r_id, variables, sigma, measurement, -1},
-      contact_points_(contact_points), contact_normals_(contact_normals),
-      n_contact_points_(contact_points.size()) {
+                                           float sigma, const Eigen::VectorXd& measurement)
+    : Factor{f_id, r_id, variables, sigma, measurement} {
     
     factor_type_ = FORCE_ALLOCATION_FACTOR;
     this->linear_ = true;
-    
     desired_wrench_ = Eigen::Vector3d::Zero();
-    
-    if (n_contact_points_ > 0) {
-        computeGMatrix();
-    }
-    
-    std::cout << "ForceAllocationFactor created with " << n_contact_points_ 
-              << " contact points" << std::endl;
-}
-
-void ForceAllocationFactor::updateGeometry(const std::vector<Eigen::Vector2d>& contact_points,
-                                         const std::vector<Eigen::Vector2d>& contact_normals) {
-    contact_points_ = contact_points;
-    contact_normals_ = contact_normals;
-    n_contact_points_ = contact_points.size();
-    
-    if (n_contact_points_ > 0) {
-        computeGMatrix();
-    }
-}
-
-void ForceAllocationFactor::updateDesiredWrench(const Eigen::Vector3d& desired_wrench) {
-    desired_wrench_ = desired_wrench;
-}
-
-void ForceAllocationFactor::computeGMatrix() {
-    // G矩阵：[3 x n_contacts]，将接触力映射到payload上的合力和力矩
-    G_matrix_ = Eigen::MatrixXd::Zero(3, n_contact_points_);
-    
-    for (int i = 0; i < n_contact_points_; i++) {
-        Eigen::Vector2d contact_normal = contact_normals_[i];
-        Eigen::Vector2d r_vector = contact_points_[i];  // 接触点相对payload中心的位置
-        
-        // 力的贡献: f_i * n_i
-        G_matrix_(0, i) = contact_normal.x();  // x方向力
-        G_matrix_(1, i) = contact_normal.y();  // y方向力
-        
-        // 力矩的贡献: τ = r × f = r_x * f_y - r_y * f_x
-        double torque_contribution = r_vector.x() * contact_normal.y() - r_vector.y() * contact_normal.x();
-        G_matrix_(2, i) = torque_contribution;
-    }
-    
-    std::cout << "G matrix computed (3x" << n_contact_points_ << "):\n" << G_matrix_ << std::endl;
 }
 
 Eigen::MatrixXd ForceAllocationFactor::h_func_(const Eigen::VectorXd& X) {
-    // X = [contact_forces(n_contacts)]  // 所有机器人的接触力
-    // 测量函数: h = G * f - w_desired = 0
-    
-    if (X.size() != n_contact_points_) {
-        std::cerr << "ForceAllocationFactor: X.size() = " << X.size() 
-                  << " != n_contact_points = " << n_contact_points_ << std::endl;
-        return Eigen::MatrixXd::Zero(3, 1);
-    }
-    
-    Eigen::VectorXd contact_forces = X;  // [f1, f2, f3, f4, ...]
-    Eigen::Vector3d actual_wrench = G_matrix_ * contact_forces;
-    Eigen::Vector3d wrench_error = actual_wrench - desired_wrench_;
-    
-    return wrench_error;  // [fx_error, fy_error, τ_error]
+
 }
 
 Eigen::MatrixXd ForceAllocationFactor::J_func_(const Eigen::VectorXd& X) {
-    // 对于线性系统 h = G * f - w_desired，雅可比就是 G 矩阵
-    return G_matrix_;  // [3 x n_contacts]
+
 }
 
 
@@ -337,113 +276,6 @@ Eigen::MatrixXd ForceAllocationFactor::J_func_(const Eigen::VectorXd& X) {
 // Create a new factor definition as shown with these examples.
 // You may create a new factor_type_, in the enum in Factor.h (optional, default type is DEFAULT_FACTOR)
 // Create a measurement function h_func_() and optionally Jacobian J_func_().
-
-PayloadTwistFactor::PayloadTwistFactor(int f_id, int r_id, 
-                                       std::vector<std::shared_ptr<Variable>> variables,
-                                       float sigma, const Eigen::VectorXd& measurement,
-                                       Eigen::Vector2d r_vector,
-                                       Eigen::Vector2d normal_vector)
-    : Factor{f_id, r_id, variables, sigma, measurement, -1},
-      r_(r_vector), contact_normal_(normal_vector) {
-    
-    factor_type_ = PAYLOAD_TWIST_FACTOR;
-    this->linear_ = true;
-    
-    // 检查连接的变量
-    if (variables.size() != 2) {
-        std::cerr << "PayloadTwistFactor: Expected 2 variables, got " << variables.size() << std::endl;
-    }
-    
-    // 如果几何参数非零，立即预计算
-    if (r_.norm() > 1e-6 && contact_normal_.norm() > 1e-6) {
-        precomputeGeometry();
-        precomputeJacobian();
-    } 
-    // else {
-    //     std::cout << "PayloadTwistFactor " << f_id_ 
-    //               << " created with zero geometry (will be updated later)" << std::endl;
-    // }
-}
-
-void PayloadTwistFactor::updateGeometry(const Eigen::Vector2d& r_vector, 
-                                       const Eigen::Vector2d& normal_vector) {
-    // 更新几何参数
-    r_ = r_vector;
-    contact_normal_ = normal_vector;
-    
-    // 重新计算几何量和雅可比
-    precomputeGeometry();
-    precomputeJacobian();
-}
-
-// 测量函数实现
-Eigen::MatrixXd PayloadTwistFactor::h_func_(const Eigen::VectorXd& X) {
-    // X = [robot_pos(2), robot_vel(2), payload_twist(3)]
-    
-    Eigen::Vector2d robot_vel = X.segment(2, 2);      // v_i
-    Eigen::Vector3d payload_twist = X.segment(4, 3);  // [v_c_x, v_c_y, ω]
-    
-    // 载荷运动分解
-    Eigen::Vector2d v_c(payload_twist(0), payload_twist(1));
-    double omega = payload_twist(2);
-    
-    // 载荷在接触点的期望速度：v_contact = v_c + ω × r
-    Eigen::Vector2d v_contact_expected = v_c + omega * r_perp_;
-    
-    // 速度差异
-    Eigen::Vector2d velocity_error = v_contact_expected - robot_vel;
-    
-    // 线性约束函数
-    Eigen::MatrixXd h(2, 1);
-    h(0, 0) = velocity_error.dot(contact_normal_);  // 法向分量
-    h(1, 0) = velocity_error.dot(tangent_);         // 切向分量
-    
-    return h;
-}
-
-Eigen::MatrixXd PayloadTwistFactor::J_func_(const Eigen::VectorXd& X) {
-    // 直接返回预计算的常量雅可比（不依赖输入 X）
-    return J_;
-}
-
-void PayloadTwistFactor::precomputeGeometry() {
-    // 预计算几何量
-    r_perp_ = Eigen::Vector2d(-r_.y(), r_.x());                        // r的垂直向量
-    tangent_ = Eigen::Vector2d(-contact_normal_.y(), contact_normal_.x()); // 切向量
-}
-
-void PayloadTwistFactor::precomputeJacobian() {
-    // 对于线性约束，雅可比是常量矩阵
-    // h = [n^T(v_c + ω·r⊥ - v_i)]
-    //     [t^T(v_c + ω·r⊥ - v_i)]
-    
-    // X = [robot_pos(2), robot_vel(2), payload_twist(3)]
-    //      0,1           2,3           4,5,6
-    
-    J_ = Eigen::MatrixXd::Zero(2, 7);  // 2个约束，7个变量
-    
-    // ∂h/∂robot_pos = 0 (位置不直接影响速度约束)
-    // J_(0:1, 0:1) = 0  // 已经是零矩阵
-    
-    // ∂h/∂robot_vel = -[n^T; t^T]
-    J_(0, 2) = -contact_normal_.x();  // ∂h₀/∂vᵢₓ
-    J_(0, 3) = -contact_normal_.y();  // ∂h₀/∂vᵢᵧ
-    J_(1, 2) = -tangent_.x();         // ∂h₁/∂vᵢₓ  
-    J_(1, 3) = -tangent_.y();         // ∂h₁/∂vᵢᵧ
-    
-    // ∂h/∂payload_twist = [n^T, t^T] ⊗ [I, r⊥]
-    // 对 v_c_x, v_c_y
-    J_(0, 4) = contact_normal_.x();   // ∂h₀/∂vcₓ
-    J_(0, 5) = contact_normal_.y();   // ∂h₀/∂vcᵧ
-    J_(1, 4) = tangent_.x();          // ∂h₁/∂vcₓ
-    J_(1, 5) = tangent_.y();          // ∂h₁/∂vcᵧ
-    
-    // 对 ω
-    double n_dot_r_perp = contact_normal_.dot(r_perp_);
-    double t_dot_r_perp = tangent_.dot(r_perp_);
-    J_(0, 6) = n_dot_r_perp;          // ∂h₀/∂ω
-    J_(1, 6) = t_dot_r_perp;          // ∂h₁/∂ω
-}
 
 /********************************************************************************************/
 /* Dynamics factor: constant-velocity model */

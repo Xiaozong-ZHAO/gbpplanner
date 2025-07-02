@@ -129,16 +129,9 @@ private:
     std::vector<Eigen::Vector2d> contact_normals_;  // Contact normal vectors
 
 public:
-    ForceAllocationFactor(int f_id, int r_id, 
+    ForceAllocationFactor(Simulator* sim, int f_id, int r_id, 
                          std::vector<std::shared_ptr<Variable>> variables,
-                         float sigma, const Eigen::VectorXd& measurement,
-                         const std::vector<Eigen::Vector2d>& contact_points,
-                         const std::vector<Eigen::Vector2d>& contact_normals);
-    
-    // Geometry and control updates
-    void updateGeometry(const std::vector<Eigen::Vector2d>& contact_points,
-                       const std::vector<Eigen::Vector2d>& contact_normals);
-    void updateDesiredWrench(const Eigen::Vector3d& desired_wrench);
+                         float sigma, const Eigen::VectorXd& measurement);
     
     // Factor interface implementation
     Eigen::MatrixXd h_func_(const Eigen::VectorXd& X) override;
@@ -148,43 +141,6 @@ private:
     void computeGMatrix();                      // Compute contact mapping matrix
 };
 
-//==========================================================================
-// PAYLOAD TWIST FACTOR
-// Enforces kinematic consistency between robot motion and payload twist
-//==========================================================================
-class PayloadTwistFactor : public Factor {
-private:
-    // Geometric parameters (constant after construction)
-    Eigen::Vector2d r_;                         // Contact point relative to payload COM
-    Eigen::Vector2d contact_normal_;            // Contact normal vector
-    
-    // Precomputed geometry (for efficiency)
-    Eigen::Vector2d r_perp_;                    // Perpendicular to r vector
-    Eigen::Vector2d tangent_;                   // Tangent vector
-
-public:
-    PayloadTwistFactor(int f_id, int r_id, 
-                       std::vector<std::shared_ptr<Variable>> variables,
-                       float sigma, const Eigen::VectorXd& measurement,
-                       Eigen::Vector2d r_vector,        // Moment arm vector
-                       Eigen::Vector2d normal_vector);  // Contact normal vector
-    
-    // Geometry updates
-    void updateGeometry(const Eigen::Vector2d& r_vector, 
-                       const Eigen::Vector2d& normal_vector);
-    
-    // Factor interface implementation
-    Eigen::MatrixXd h_func_(const Eigen::VectorXd& X) override;
-    Eigen::MatrixXd J_func_(const Eigen::VectorXd& X) override;
-    
-private:
-    void precomputeGeometry();                  // Precompute geometric quantities
-    void precomputeJacobian();                  // Precompute constant Jacobian
-};
-
-/*****************************************************************************************/
-// ROBOT DYNAMICS & INTERACTION FACTORS
-/*****************************************************************************************/
 
 //==========================================================================
 // DYNAMICS FACTOR
@@ -236,62 +192,3 @@ public:
     // Obstacle avoidance implementation
     Eigen::MatrixXd h_func_(const Eigen::VectorXd& X) override;
 };
-
-/*****************************************************************************************/
-// LEGACY/COMMENTED FACTORS
-// These factors are kept commented for reference but not currently used
-/*****************************************************************************************/
-
-/*
-//==========================================================================
-// CONTACT FACTOR (Legacy - commented out)
-// Direct contact enforcement between robot and payload
-//==========================================================================
-class ContactFactor : public Factor {
-public:
-    ContactFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
-                  float sigma, const Eigen::VectorXd& measurement,
-                  std::shared_ptr<Payload> payload,
-                  Eigen::Vector2d target_contact_point,
-                  Simulator* sim);
-    
-    Eigen::MatrixXd h_func_(const Eigen::VectorXd& X) override;
-    bool skip_factor() override;
-    void draw();
-    
-    int getPayloadId() const { return payload_->payload_id_; }
-
-private:
-    std::shared_ptr<Payload> payload_;
-    Eigen::Vector2d target_contact_point_;
-    Simulator* sim_;
-    
-    double computeContactError(const Eigen::Vector2d& robot_pos);
-    Eigen::Vector2d payloadToWorld(const Eigen::Vector2d& local_point);
-};
-
-//==========================================================================
-// PAYLOAD VELOCITY FACTOR (Legacy - commented out)
-// Direct velocity control for payload manipulation
-//==========================================================================
-class PayloadVelocityFactor : public Factor {
-public:
-    PayloadVelocityFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
-                          float sigma, const Eigen::VectorXd& measurement,
-                          std::shared_ptr<Payload> payload,
-                          Eigen::Vector2d contact_normal);
-    
-    Eigen::MatrixXd h_func_(const Eigen::VectorXd& X) override;
-    bool skip_factor() override;
-    
-    int getPayloadId() const { return payload_->payload_id_; }
-
-private:
-    std::shared_ptr<Payload> payload_;
-    Eigen::Vector2d contact_normal_;
-    
-    std::pair<double, double> computeDesiredPayloadMotion();
-    std::pair<double, double> computeRobotContribution(const Eigen::Vector2d& robot_pos, 
-                                                       const Eigen::Vector2d& robot_velocity);
-};
-*/
