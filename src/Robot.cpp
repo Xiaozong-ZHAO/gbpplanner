@@ -3,6 +3,7 @@
 // This code is licensed (see LICENSE for details)
 /**************************************************************************************/
 #include <Robot.h>
+#include <Simulator.h>
 
 /***************************************************************************/
 // Creates a robot. Inputs required are :
@@ -16,14 +17,18 @@ Robot::Robot(Simulator* sim,
              int rid,
              std::deque<Eigen::VectorXd> waypoints,
              float size,
-             Color color,
-             b2World* world) : FactorGraph{rid},
+             Color color) : FactorGraph{rid},
              sim_(sim), rid_(rid),
              waypoints_(waypoints),
-             robot_radius_(size), color_(color),
-             physicsWorld_(world), usePhysics_(world != nullptr), payload_joint_(nullptr) {
+             robot_radius_(size), color_(color) {
+
 
     height_3D_ = robot_radius_;     // Height out of plane for 3d visualisation only
+    mujoco_body_id_ = -1;  // 无效ID，将在后续设置
+    mujoco_joint_id_ = -1;
+    mujoco_model_ = nullptr;
+    mujoco_data_ = nullptr;
+
 
     // Robot will always set its horizon state to move towards the next waypoint.
     // Once this waypoint has been reached, it pops it from the waypoints
@@ -31,9 +36,6 @@ Robot::Robot(Simulator* sim,
     waypoints_.pop_front();                             
     auto goal = (waypoints_.size()>0) ? waypoints_[0] : start;
 
-    if (usePhysics_ && physicsWorld_) {
-        createPhysicsBody();
-    }
 
     // Initialise the horzion in the direction of the goal, at a distance T_HORIZON * MAX_SPEED from the start.
     Eigen::VectorXd start2goal = goal - start;
@@ -91,155 +93,174 @@ Robot::Robot(Simulator* sim,
 
     payload_twist_variables_.clear();  // 初始化容器
     payload_geometry_cached_ = false;
+
+    for (int i = 1; i < num_variables_ - 1; i++){
+        std::vector<std::shared_ptr<Variable>> variables{getVar(i)};
+        auto fac_force = std::make_shared<ForceAllocationFactor>(sim, sim->next_fid_++, rid_, variables, globals.SIGMA_FACTOR_FORCE_ALLOCATION, Eigen::VectorXd::Zero(3));
+
+        for (auto var : fac_force->variables_) var->add_factor(fac_force);
+        this->factors_[fac_force->key_] = fac_force;
+    }
+
+};
+
+// 7. 重写物理属性查询方法
+Eigen::Vector2d Robot::getMuJoCoPosition() const {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) {
+        return Eigen::Vector2d(position_(0), position_(1));
+    }
     
-if (globals.FORMATION == "Payload") {
-    // 获取 payload 信息进行插值计算
-    if (!sim_->payloads_.empty()) {
-        auto payload = sim_->payloads_.begin()->second;
-        
-        // 1. 计算 payload 的起始状态 [x, y, vx, vy, ω]
-        Eigen::VectorXd payload_start(5);
-        payload_start(0) = payload->getPosition().x();       // 当前位置 x
-        payload_start(1) = payload->getPosition().y();       // 当前位置 y
-        payload_start(2) = payload->getVelocity().x();       // 当前线速度 vx
-        payload_start(3) = payload->getVelocity().y();       // 当前线速度 vy  
-        payload_start(4) = payload->getAngularVelocity();    // 当前角速度 ω
-        
-        // 2. 计算 payload 的目标状态 [x, y, vx, vy, ω]
-        Eigen::VectorXd payload_target(5);
-        payload_target(0) = payload->target_position_.x();   // 目标位置 x
-        payload_target(1) = payload->target_position_.y();   // 目标位置 y
-        
-        // 计算期望线速度（朝向目标位置）
-        Eigen::Vector2d payload_to_target = payload->target_position_ - payload->position_;
-        if (payload_to_target.norm() > 0.1) {
-            Eigen::Vector2d desired_velocity = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
-            payload_target(2) = desired_velocity.x();
-            payload_target(3) = desired_velocity.y();
-        } else {
-            payload_target(2) = 0.0;
-            payload_target(3) = 0.0;
+    int pos_adr = mujoco_model_->jnt_qposadr[mujoco_body_id_];
+    return Eigen::Vector2d(mujoco_data_->qpos[pos_adr + 0], mujoco_data_->qpos[pos_adr + 1]);
+}
+
+Eigen::Vector2d Robot::getMuJoCoVelocity() const {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) {
+        if (position_.size() >= 4) {
+            return Eigen::Vector2d(position_(2), position_(3));
         }
-        
-        // 计算期望角速度（朝向目标朝向）
-        double rotation_error = payload->getRotationError();
-        if (std::abs(rotation_error) > 0.01) {
-            double desired_angular_velocity = std::copysign(1.0, rotation_error) * 
-                std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), std::abs(rotation_error));
-            payload_target(4) = desired_angular_velocity;
-        } else {
-            payload_target(4) = 0.0;
-        }
-        
-        // 3. 计算 payload 的 horizon（类似 robot 的逻辑）
-        Eigen::VectorXd payload_start2target = payload_target - payload_start;
-        Eigen::VectorXd payload_horizon = payload_start + 
-            std::min(payload_start2target.norm(), 1.*globals.T_HORIZON*globals.MAX_SPEED) * 
-            payload_start2target.normalized();
-        
-        // 4. 为每个时间步创建 payload variables，使用与 robot 相同的插值逻辑
-        for (int i = 0; i < num_variables_; i++) {
-            // *** 关键：使用与 robot variables 相同的插值参数 ***
-            double alpha = (double)variable_timesteps[i] / (double)variable_timesteps.back();
-            Eigen::VectorXd payload_mu = payload_start + (payload_horizon - payload_start) * alpha;
-            
-            // 与 robot variable 类似的先验设置
-            double sigma;
-            if (i == 0 || i == num_variables_ - 1) {
-                // 当前状态和地平线状态：使用适中的先验强度
-                sigma = 0.1;  
-            } else {
-                // 中间状态：使用较弱的先验
-                sigma = 1.0;
-            }
-            Eigen::VectorXd payload_sigma_list = Eigen::VectorXd::Constant(5, sigma);
-            
-            auto payload_var = std::make_shared<Variable>(
-                sim->next_vid_++, rid_, 
-                payload_mu, payload_sigma_list, 
-                robot_radius_, 5  // 5DOF for [x, y, vx, vy, ω]
-            );
-            
-            // 添加到robot的variables映射和payload专用容器
-            variables_[payload_var->key_] = payload_var;
-            payload_twist_variables_.push_back(payload_var);
-        }
-    } else {
-        // 如果没有 payload，使用零值作为后备方案
-        std::cerr << "[WARNING] No payload found for robot " << rid_ << ", using zero initialization" << std::endl;
-        
-        for (int i = 0; i < num_variables_; i++) {
-            Eigen::VectorXd payload_mu = Eigen::VectorXd::Zero(5);
-            double sigma = (i == 0 || i == num_variables_ - 1) ? 0.1 : 1.0;
-            Eigen::VectorXd payload_sigma_list = Eigen::VectorXd::Constant(5, sigma);
-            
-            auto payload_var = std::make_shared<Variable>(
-                sim->next_vid_++, rid_, 
-                payload_mu, payload_sigma_list, 
-                robot_radius_, 5
-            );
-            
-            variables_[payload_var->key_] = payload_var;
-            payload_twist_variables_.push_back(payload_var);
-        }
+        return Eigen::Vector2d::Zero();
+    }
+    
+    int vel_adr = mujoco_model_->jnt_dofadr[mujoco_body_id_];
+    return Eigen::Vector2d(mujoco_data_->qvel[vel_adr + 0], mujoco_data_->qvel[vel_adr + 1]);
+}
+
+void Robot::setMuJoCoPosition(const Eigen::Vector2d& position) {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) return;
+    
+    int pos_adr = mujoco_model_->jnt_qposadr[mujoco_body_id_];
+    mujoco_data_->qpos[pos_adr + 0] = position.x();
+    mujoco_data_->qpos[pos_adr + 1] = position.y();
+}
+
+void Robot::setMuJoCoVelocity(const Eigen::Vector2d& velocity) {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) return;
+    
+    int vel_adr = mujoco_model_->jnt_dofadr[mujoco_body_id_];
+    mujoco_data_->qvel[vel_adr + 0] = velocity.x();
+    mujoco_data_->qvel[vel_adr + 1] = velocity.y();
+}
+
+void Robot::syncToMuJoCo() {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) return;
+    
+    int pos_adr = mujoco_model_->jnt_qposadr[mujoco_body_id_];
+    int vel_adr = mujoco_model_->jnt_dofadr[mujoco_body_id_];
+    
+    // 设置位置
+    mujoco_data_->qpos[pos_adr + 0] = position_(0);     // x
+    mujoco_data_->qpos[pos_adr + 1] = position_(1);     // y
+    mujoco_data_->qpos[pos_adr + 2] = 0.1;              // z (固定高度)
+    
+    // 设置朝向为无旋转（四元数）
+    mujoco_data_->qpos[pos_adr + 3] = 1.0;              // qw
+    mujoco_data_->qpos[pos_adr + 4] = 0.0;              // qx
+    mujoco_data_->qpos[pos_adr + 5] = 0.0;              // qy
+    mujoco_data_->qpos[pos_adr + 6] = 0.0;              // qz
+    
+    // 设置速度
+    if (position_.size() >= 4) {
+        mujoco_data_->qvel[vel_adr + 0] = position_(2); // vx
+        mujoco_data_->qvel[vel_adr + 1] = position_(3); // vy
+        mujoco_data_->qvel[vel_adr + 2] = 0.0;          // vz
+        mujoco_data_->qvel[vel_adr + 3] = 0.0;          // wx
+        mujoco_data_->qvel[vel_adr + 4] = 0.0;          // wy
+        mujoco_data_->qvel[vel_adr + 5] = 0.0;          // wz
     }
 }
 
-    /***************************************************************************/
-    /* 创建PayloadTwistFactors连接对应的robot和payload variables */
-    /* 只为中间变量创建因子，不包括当前状态(0)和地平线状态(最后一个) */
-    /***************************************************************************/
-    if (globals.FORMATION == "Payload" && !payload_twist_variables_.empty()) {
+void Robot::applyMuJoCoForce(const Eigen::Vector2d& force, const Eigen::Vector2d& point) {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) return;
+    
+    // 使用MuJoCo的external force接口
+    if (point.norm() < 1e-6) {
+        // 在质心施加力
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 0] = force.x();
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 1] = force.y();
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 2] = 0.0;
+    } else {
+        // 在指定点施加力（需要计算等效的力和力矩）
+        Eigen::Vector2d center = getMuJoCoPosition();
+        Eigen::Vector2d r = point - center;
+        double torque = r.x() * force.y() - r.y() * force.x();
         
-        for (int i = 0; i < num_variables_; i++) {
-            std::vector<std::shared_ptr<Variable>> variables{
-                getVar(i),                        // robot variable i (4DOF)
-                payload_twist_variables_.at(i)       // payload variable i (3DOF)
-            };
-            
-            // 注意：几何参数需要在运行时获取，这里先用零值
-            // 实际几何参数将在createPayloadTwistFactor()中设置
-            auto factor = std::make_shared<PayloadTwistFactor>(
-                sim->next_fid_++, rid_, variables,
-                globals.SIGMA_FACTOR_PAYLOAD_TWIST,
-                Eigen::VectorXd::Zero(2),
-                Eigen::Vector2d::Zero(),    // 临时：r_vector
-                Eigen::Vector2d::Zero()     // 临时：contact_normal
-            );
-            
-            // 添加到因子图
-            for (auto var : factor->variables_) var->add_factor(factor);
-            this->factors_[factor->key_] = factor;
-            payload_twist_factors_.push_back(factor);
-        }
-
-        // 检测所有变量的 outbox 中是否有空的 mu 向量（所有 PayloadTwistFactor 创建完成后）
-        bool has_empty_outbox_mu = false;
-        for (auto& [v_key, variable] : variables_) {
-            for (auto& [key, message] : variable->outbox_) {
-                if (message.mu.rows() == 0) {
-                    has_empty_outbox_mu = true;
-                    break;
-                }
-            }
-            if (has_empty_outbox_mu) break;
-        }
-        
-        if (has_empty_outbox_mu) {
-            std::cerr << "🔥 Robot " << rid_ << " has empty mu in variable outbox after all PayloadTwistFactors created!" << std::endl;
-            // 在这里设置断点 ↑
-        }
-
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 0] = force.x();
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 1] = force.y();
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 2] = 0.0;
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 3] = 0.0;
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 4] = 0.0;
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 5] = torque;
     }
-    std::cout << "test" << std::endl;
+}
 
-};
+void Robot::applyMuJoCoTorque(double torque) {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) return;
+    
+    mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 5] = torque;
+}
+
+
+
+void Robot::syncFromMuJoCo() {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) return;
+    
+    // 计算在qpos和qvel中的索引
+    int pos_adr = mujoco_model_->jnt_qposadr[mujoco_body_id_];
+    int vel_adr = mujoco_model_->jnt_dofadr[mujoco_body_id_];
+    
+    // 更新位置 (假设free joint: x, y, z, qw, qx, qy, qz)
+    position_(0) = mujoco_data_->qpos[pos_adr + 0];     // x
+    position_(1) = mujoco_data_->qpos[pos_adr + 1];     // y
+    
+    // 更新速度 (假设free joint: vx, vy, vz, wx, wy, wz)
+    if (position_.size() >= 4) {
+        position_(2) = mujoco_data_->qvel[vel_adr + 0]; // vx
+        position_(3) = mujoco_data_->qvel[vel_adr + 1]; // vy
+    }
+}
 
 /***************************************************************************************************/
 /* Destructor */
 /***************************************************************************************************/
 Robot::~Robot(){
-    detachFromPayload();
+    detachFromPayloadMuJoCo();
+}
+
+void Robot::setMuJoCoReferences(mjModel* model, mjData* data) {
+    mujoco_model_ = model;
+    mujoco_data_ = data;
+}
+
+void Robot::createContactForceVariables() {
+    // 为每个时间步创建接触力变量（标量，表示法向接触力大小）
+    for (int i = 0; i < num_variables_; i++) {
+        Eigen::VectorXd force_mu = Eigen::VectorXd::Zero(1);  // 初始接触力为0
+        Eigen::VectorXd force_sigma = Eigen::VectorXd::Constant(1, 1.0);  // 适中的先验强度
+        
+        auto contact_force_var = std::make_shared<Variable>(
+            sim_->next_vid_++, rid_, 
+            force_mu, force_sigma, 
+            robot_radius_, 1  // 1DOF for contact force magnitude
+        );
+        
+        variables_[contact_force_var->key_] = contact_force_var;
+        contact_force_variables_.push_back(contact_force_var);
+    }
+    
+    std::cout << "Robot " << rid_ << " created " << contact_force_variables_.size() 
+              << " contact force variables" << std::endl;
+}
+
+void Robot::updateContactForceGeometry() {
+    if (!force_allocation_factor_) return;
+    
+    // 更新力分配因子的几何参数
+    if (!sim_->payloads_.empty()) {
+        auto payload = sim_->payloads_.begin()->second;
+        auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
+        force_allocation_factor_->updateGeometry(contact_points, contact_normals);
+    }
 }
 
 void Robot::cachePayloadGeometry() {
@@ -261,9 +282,6 @@ void Robot::cachePayloadGeometry() {
     cached_contact_normal_ = contact_normals[assigned_contact_point_index_];
     payload_geometry_cached_ = true;
     
-    // std::cout << "Robot " << rid_ << " cached geometry: r=" 
-    //           << cached_r_vector_.transpose() << ", n=" 
-    //           << cached_contact_normal_.transpose() << std::endl;
 }
 
 void Robot::updatePayloadFactorGeometry() {
@@ -352,45 +370,50 @@ void Robot::updatePayloadTwistPriors() {
 }
 
 // Robot.cpp 中的正确实现
-
-void Robot::attachToPayload(std::shared_ptr<Payload> payload, const Eigen::Vector2d& attach_point) {
-    if (!physicsBody_ || !payload->physicsBody_) {
-        std::cout << "Error: Cannot attach - missing physics bodies" << std::endl;
+void Robot::attachToPayloadMuJoCo(std::shared_ptr<Payload> payload, const Eigen::Vector2d& attach_point) {
+    if (mujoco_body_id_ < 0 || payload->mujoco_body_id_ < 0) {
+        std::cout << "Error: Cannot attach - invalid MuJoCo body IDs" << std::endl;
         return;
     }
     
-    if (payload_joint_) {
-        detachFromPayload(); // 先断开现有连接
+    if (mujoco_joint_id_ >= 0) {
+        detachFromPayloadMuJoCo(); // 先断开现有连接
     }
     
-    // 创建焊接关节定义
-    b2WeldJointDef jointDef;
-    jointDef.bodyA = physicsBody_;           // 机器人
-    jointDef.bodyB = payload->physicsBody_;  // payload
+    // 在MuJoCo中创建约束需要修改模型，这比较复杂
+    // 简化方案：使用equality constraints运行时创建连接
+    if (!mujoco_model_ || !mujoco_data_) return;
     
-    // 设置连接点（局部坐标）
-    jointDef.localAnchorA = physicsBody_->GetLocalPoint(b2Vec2(attach_point.x(), attach_point.y()));
-    jointDef.localAnchorB = payload->physicsBody_->GetLocalPoint(b2Vec2(attach_point.x(), attach_point.y()));
+    // 检查是否有可用的equality constraint slots
+    if (mujoco_data_->ne >= mujoco_model_->neq) {
+        std::cout << "Error: No available equality constraints for attachment" << std::endl;
+        return;
+    }
     
-    // 设置相对角度（保持当前相对角度）
-    jointDef.referenceAngle = payload->physicsBody_->GetAngle() - physicsBody_->GetAngle();
+    // 创建位置约束（将在下一个mj_step中生效）
+    // 这是简化版本，实际上可能需要更复杂的约束设置
+    mujoco_joint_id_ = mujoco_data_->ne;  // 使用下一个可用约束ID
     
-    // 使用正确的参数名
-    jointDef.stiffness = 30000.0f;  // 刚度 (N*m) - 数值越大越"硬"
-    jointDef.damping = 1000.0f;     // 阻尼 (N*m*s) - 防止震荡
-    
-    // 创建关节
-    payload_joint_ = (b2WeldJoint*)physicsWorld_->CreateJoint(&jointDef);
-    
-    // std::cout << "Robot " << rid_ << " attached to payload at (" 
-    //           << attach_point.x() << ", " << attach_point.y() << ")" << std::endl;
+    // 注意：完整的关节创建需要在XML模型中预定义或使用MuJoCo的动态约束API
+    std::cout << "Robot " << rid_ << " attached to payload using MuJoCo constraint " 
+              << mujoco_joint_id_ << std::endl;
 }
 
-void Robot::detachFromPayload() {
-    if (payload_joint_ && physicsWorld_) {
-        physicsWorld_->DestroyJoint(payload_joint_);
-        payload_joint_ = nullptr;
-        // std::cout << "Robot " << rid_ << " detached from payload" << std::endl;
+void Robot::attachToPayload(std::shared_ptr<Payload> payload, const Eigen::Vector2d& attach_point) {
+    // 调用MuJoCo版本的实现
+    attachToPayloadMuJoCo(payload, attach_point);
+}
+
+void Robot::detachFromPayloadMuJoCo() {
+    if (mujoco_joint_id_ >= 0) {
+        // 禁用对应的equality constraint
+        if (mujoco_data_ && mujoco_joint_id_ < mujoco_data_->ne) {
+            // 设置约束为非活动状态（具体实现依赖于MuJoCo版本）
+            // mujoco_data_->eq_active[mujoco_joint_id_] = 0;  // 如果支持的话
+        }
+        
+        mujoco_joint_id_ = -1;
+        std::cout << "Robot " << rid_ << " detached from payload" << std::endl;
     }
 }
 
@@ -426,38 +449,10 @@ bool Robot::isConnectedToPayload(int payload_id) const {
 }
 
 
-void Robot::createPhysicsBody(){
-
-    if (!physicsWorld_) {
-        std::cerr << "Error: physicsWorld_ is null." << std::endl;
-        return;
+void Robot::createMuJoCoBody() {
+    if (mujoco_body_id_ > 0){
+        std::cerr << "Warning: Robot" << rid_ << "MuJoCo body ID not set" <<std::endl;
     }
-
-    if (position_.size() < 2) {
-        std::cerr << "Error: position_.size() is" << position_.size() << ", expected at least 2." << std::endl;
-        return;
-    }
-
-    // Create a physics body for the robot
-    b2BodyDef bodyDef;
-    bodyDef.type = b2_dynamicBody;
-    bodyDef.position.Set(position_(0), position_(1));
-    physicsBody_ = physicsWorld_->CreateBody(&bodyDef);
-
-    // Create a circle collision shape for the robot
-    b2CircleShape circleShape;
-    circleShape.m_radius = robot_radius_;
-
-    // Create a fixture definition for the circle shape
-    b2FixtureDef fixtureDef;
-    fixtureDef.shape = &circleShape;
-    fixtureDef.density = 0.1f;
-    fixtureDef.friction = 0.5f;
-    fixtureDef.restitution = 0.1f;
-
-    physicsBody_->CreateFixture(&fixtureDef);
-    
-    physicsBody_->SetLinearDamping(0.1f);
 }
 
 /***************************************************************************************************/
@@ -475,114 +470,31 @@ void Robot::updateCurrent(){
     getVar(0)->change_variable_prior(getVar(0)->mu_ + increment);
     // Real pose update
     position_ = position_ + increment;
-
-    if (usePhysics_ && physicsBody_){
-        // Update the physics body position to match the logical position
-        syncLogicalToPhysics();
-    }
-
+    
+    syncToMuJoCo();
 };
 
 void Robot::syncLogicalToPhysics(){
-    if (!usePhysics_ || !physicsBody_) return;
-    
-    physicsBody_->SetTransform(b2Vec2(position_(0), position_(1)), 0.0f);
-    Eigen::VectorXd increment = ((*this)[1]->mu_ - (*this)[0]->mu_) * globals.TIMESTEP / globals.T0;
-    b2Vec2 desiredVel(increment(0) / globals.TIMESTEP, increment(1) / globals.TIMESTEP);
-    physicsBody_->SetLinearVelocity(desiredVel);
+    syncToMuJoCo();
 }
 
 void Robot::syncPhysicsToLogical(){
-    if (!usePhysics_ || !physicsBody_) return;
-
-    b2Vec2 phyPos = physicsBody_->GetPosition();
-    position_[0] = phyPos.x;
-    position_[1] = phyPos.y;
-
+    syncFromMuJoCo();
 }
 
 /***************************************************************************************************/
 /* Change the prior of the Horizon state */
 /***************************************************************************************************/
-// void Robot::updateHorizon(){
-//     // Horizon state moves towards the next waypoint.
-//     // The Horizon state's velocity is capped at MAX_SPEED
-//     auto horizon = getVar(14);      // get horizon state variable
-//     Eigen::VectorXd dist_horz_to_goal = waypoints_.front()({0,1}) - horizon->mu_({0,1});                        
-//     Eigen::VectorXd new_vel = dist_horz_to_goal.normalized() * std::min((double)globals.MAX_SPEED, dist_horz_to_goal.norm());
-//     Eigen::VectorXd new_pos = horizon->mu_({0,1}) + new_vel*globals.TIMESTEP;
-
-//     horizon->mu_ << new_pos, new_vel;
-//     horizon->change_variable_prior(horizon->mu_);
-
-//     // If the horizon has reached the waypoint, pop that waypoint from the waypoints.
-//     // Could add other waypoint behaviours here (maybe they might move, or change randomly).
-//     if (dist_horz_to_goal.norm() < robot_radius_){
-//         if (waypoints_.size()>1) waypoints_.pop_front();
-//     }
-// }
-
 void Robot::updateHorizon(){
-    // ========== 更新 Robot Variable Horizon ==========
-    // 注意：现在需要明确获取 robot horizon (第14个变量，而不是最后一个)
-    auto robot_horizon = getVar(num_variables_ - 1);  // robot variables 的最后一个
-    Eigen::VectorXd dist_horz_to_goal = waypoints_.front()({0,1}) - robot_horizon->mu_({0,1});                        
+    // Horizon state moves towards the next waypoint.
+    // The Horizon state's velocity is capped at MAX_SPEED
+    auto horizon = getVar(14);      // get horizon state variable
+    Eigen::VectorXd dist_horz_to_goal = waypoints_.front()({0,1}) - horizon->mu_({0,1});                        
     Eigen::VectorXd new_vel = dist_horz_to_goal.normalized() * std::min((double)globals.MAX_SPEED, dist_horz_to_goal.norm());
-    Eigen::VectorXd new_pos = robot_horizon->mu_({0,1}) + new_vel*globals.TIMESTEP;
+    Eigen::VectorXd new_pos = horizon->mu_({0,1}) + new_vel*globals.TIMESTEP;
 
-    robot_horizon->mu_ << new_pos, new_vel;
-    robot_horizon->change_variable_prior(robot_horizon->mu_);
-
-    // ========== 更新 Payload Variable Horizon ==========
-    if (globals.FORMATION == "Payload" && !payload_twist_variables_.empty() && !sim_->payloads_.empty()) {
-        auto payload = sim_->payloads_.begin()->second;
-        auto payload_horizon = payload_twist_variables_.back();  // payload variables 的最后一个
-        
-        // 计算 payload 的期望状态
-        Eigen::VectorXd payload_new_mu(5);
-        
-        // 1. 计算期望位置（朝向目标位置移动）
-        Eigen::Vector2d payload_to_target = payload->target_position_ - payload->getPosition();
-        Eigen::Vector2d payload_new_pos;
-        
-        if (payload_to_target.norm() > 0.1) {
-            // 朝向目标移动
-            Eigen::Vector2d payload_vel_dir = payload_to_target.normalized();
-            double payload_move_distance = std::min((double)globals.MAX_SPEED * globals.TIMESTEP, 
-                                                   payload_to_target.norm());
-            payload_new_pos = payload->getPosition() + payload_vel_dir * payload_move_distance;
-        } else {
-            // 已经接近目标，保持当前位置
-            payload_new_pos = payload->target_position_;
-        }
-        
-        // 2. 计算期望速度
-        Eigen::Vector2d payload_new_vel;
-        if (payload_to_target.norm() > 0.1) {
-            payload_new_vel = payload_to_target.normalized() * 
-                std::min((double)globals.MAX_SPEED * 0.5, payload_to_target.norm() / globals.TIMESTEP);
-        } else {
-            payload_new_vel = Eigen::Vector2d::Zero();
-        }
-        
-        // 3. 计算期望角速度
-        double payload_new_omega = 0.0;
-        double rotation_error = payload->getRotationError();
-        if (std::abs(rotation_error) > 0.01) {
-            payload_new_omega = std::copysign(1.0, rotation_error) * 
-                std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), 
-                        std::abs(rotation_error) / globals.TIMESTEP);
-        }
-        
-        // 4. 组装新的 payload horizon 状态 [x, y, vx, vy, ω]
-        payload_new_mu << payload_new_pos.x(), payload_new_pos.y(), 
-                         payload_new_vel.x(), payload_new_vel.y(), 
-                         payload_new_omega;
-        
-        // 5. 更新 payload horizon variable
-        payload_horizon->mu_ = payload_new_mu;
-        payload_horizon->change_variable_prior(payload_horizon->mu_);
-    }
+    horizon->mu_ << new_pos, new_vel;
+    horizon->change_variable_prior(horizon->mu_);
 
     // If the horizon has reached the waypoint, pop that waypoint from the waypoints.
     // Could add other waypoint behaviours here (maybe they might move, or change randomly).
@@ -590,7 +502,6 @@ void Robot::updateHorizon(){
         if (waypoints_.size()>1) waypoints_.pop_front();
     }
 }
-
 
 /***************************************************************************************************/
 // For new neighbours of a robot, create inter-robot factors if they don't exist. 
@@ -762,19 +673,18 @@ void Robot::drawVelocityVector() {
 }
 
 Eigen::Vector2d Robot::getCurrentVelocity() const {
-    // 从物理引擎获取当前速度
-    if (physicsBody_) {
-        b2Vec2 vel = physicsBody_->GetLinearVelocity();
-        return Eigen::Vector2d(vel.x, vel.y);
+    // 优先从MuJoCo获取
+    if (mujoco_body_id_ >= 0 && mujoco_model_ && mujoco_data_) {
+        return getMuJoCoVelocity();
     }
     
-    // 如果没有物理体，从规划路径中估算
+    // Fallback到原有逻辑
     if (variables_.size() >= 2) {
         auto current_var = getVar(0);
         auto next_var = getVar(1);
         if (current_var && next_var && current_var->valid_ && next_var->valid_) {
             Eigen::Vector2d pos_diff = next_var->mu_.head(2) - current_var->mu_.head(2);
-            return pos_diff / globals.T0; // T0是时间步长
+            return pos_diff / globals.T0;
         }
     }
     

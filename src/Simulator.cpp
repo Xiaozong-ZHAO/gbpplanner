@@ -2,6 +2,7 @@
 // Copyright (c) 2023 Aalok Patwardhan (a.patwardhan21@imperial.ac.uk)
 // This code is licensed (see LICENSE for details)
 /**************************************************************************************/
+
 #include <iostream>
 #include <gbp/GBPCore.h>
 #include <Simulator.h>
@@ -9,7 +10,9 @@
 #include <Robot.h>
 #include <Payload.h>
 #include <nanoflann.h>
-#include "box2d/box2d.h"
+#include <fstream>
+#include <sstream>
+#include <algorithm>
 
 
 /*******************************************************************************/
@@ -17,13 +20,11 @@
 /*******************************************************************************/
 Simulator::Simulator(){
     SetTraceLogLevel(LOG_ERROR);  
-    if (globals.DISPLAY){
+    if (globals.DISPLAY) {
         SetTargetFPS(60);
         InitWindow(globals.SCREEN_SZ, globals.SCREEN_SZ, globals.WINDOW_TITLE);
     }
-
-    // Initialise kdtree for storing robot positions (needed for nearest neighbour check)
-    treeOfRobots_ = new KDTree(2, robot_positions_, 50);  
+    treeOfRobots_ = new KDTree(2, robot_positions_, 50); 
 
     // For display only
     // User inputs an obstacle image where the obstacles are BLACK and background is WHITE.
@@ -33,6 +34,10 @@ Simulator::Simulator(){
     // However for calculation purposes the image needs to be inverted.
     ImageColorInvert(&obstacleImg);
     graphics = new Graphics(obstacleImg);
+
+    if (!initializeMuJoCo()) {
+        std::cerr << "Failed to initialize MuJoCo" << std::endl;
+    }
 
     if (globals.FORMATION == "Payload"){
         createPayload(Eigen::Vector2d(0., 0.), globals.PAYLOAD_WIDTH, globals.PAYLOAD_HEIGHT);
@@ -45,24 +50,22 @@ void Simulator::createPayload(Eigen::Vector2d position, float width, float heigh
     auto payload = std::make_shared<Payload>(this, next_payload_id_++, position, width, height, globals.PAYLOAD_DENSITY);
     payloads_[payload->payload_id_] = payload;
     
-    // 计算绝对目标位置（基于相对位置）
-    Eigen::Vector2d absolute_target_position = position + Eigen::Vector2d(globals.TARGET_RELATIVE_X, globals.TARGET_RELATIVE_Y);
-    
     // 设置目标位置
+    Eigen::Vector2d absolute_target_position = position + Eigen::Vector2d(globals.TARGET_RELATIVE_X, globals.TARGET_RELATIVE_Y);
     payload->setTarget(absolute_target_position);
     
-    // 设置目标朝向（如果payload支持）
-    // 关键修复：使用相对旋转设置目标朝向
-    if (std::abs(globals.TARGET_RELATIVE_ROTATION) > 0.001) {  // 如果有旋转目标
+    // 设置目标朝向
+    if (std::abs(globals.TARGET_RELATIVE_ROTATION) > 0.001) {
         payload->setTargetFromRelativeRotation(globals.TARGET_RELATIVE_ROTATION);
-        
         std::cout << "Payload target: position(" << absolute_target_position.x() << ", " << absolute_target_position.y() 
                   << ") relative_rotation(" << globals.TARGET_RELATIVE_ROTATION << " rad)" << std::endl;
     } else {
-        // 如果没有旋转目标，目标朝向等于初始朝向
         payload->target_orientation_ = payload->initial_orientation_;
         std::cout << "Payload target: position only, no rotation" << std::endl;
     }
+    
+    // 标记需要重建模型
+    model_needs_rebuild_ = true;
 }
 
 /*******************************************************************************/
@@ -72,17 +75,180 @@ Simulator::~Simulator(){
     delete treeOfRobots_;
     int n = robots_.size();
     for (int i = 0; i < n; ++i) robots_.erase(i);
-
-    if(physicsWorld_) {
-        delete physicsWorld_;
-        physicsWorld_ = nullptr;
-    }
+    destroyMuJoCo();
 
     if (globals.DISPLAY) {
         delete graphics;
         CloseWindow();
     }
+
 };
+
+bool Simulator::initializeMuJoCo() {
+
+    // 生成基本的XML模型
+    std::string xml_content = generateMuJoCoXML();
+    
+    return loadMuJoCoModel(xml_content);
+}
+
+bool Simulator::loadMuJoCoModel(const std::string& xml_content) {
+    char error[1000] = "Could not load XML model";
+    
+    // 创建临时文件
+    std::string temp_filename = "/tmp/mujoco_model_" + std::to_string(clock_) + ".xml";
+    std::ofstream temp_file(temp_filename);
+    if (!temp_file.is_open()) {
+        std::cerr << "Failed to create temp XML file" << std::endl;
+        return false;
+    }
+    
+    temp_file << xml_content;
+    temp_file.close();
+    
+    // 销毁现有模型
+    if (mujoco_data_) mj_deleteData(mujoco_data_);
+    if (mujoco_model_) mj_deleteModel(mujoco_model_);
+    
+    // 加载新模型
+    mujoco_model_ = mj_loadXML(temp_filename.c_str(), nullptr, error, 1000);
+    std::remove(temp_filename.c_str());
+    
+    if (!mujoco_model_) {
+        std::cerr << "MuJoCo model loading failed: " << error << std::endl;
+        return false;
+    }
+    
+    // 创建数据
+    mujoco_data_ = mj_makeData(mujoco_model_);
+    if (!mujoco_data_) {
+        std::cerr << "Failed to create MuJoCo data" << std::endl;
+        mj_deleteModel(mujoco_model_);
+        mujoco_model_ = nullptr;
+        return false;
+    }
+    
+    // 初始化可视化（如果需要）
+    if (globals.DISPLAY) {
+        initializeMuJoCoVisualization();
+    }
+    
+    std::cout << "MuJoCo model loaded successfully with " << mujoco_model_->nbody << " bodies" << std::endl;
+    return true;
+}
+
+std::string Simulator::generateMuJoCoXML() {
+    std::ostringstream xml;
+    
+    xml << R"(<?xml version="1.0" encoding="utf-8"?>
+<mujoco model="robot_payload_collaboration">
+    <compiler angle="radian" autolimits="true"/>
+    <option timestep=")" << globals.MUJOCO_TIMESTEP << R"(" gravity="0 0 0"/>
+    
+    <default>
+        <geom rgba="0.8 0.6 0.4 1" friction="0.5 0.1 0.1"/>
+        <joint damping="0.1"/>
+        <default class="robot">
+            <geom rgba="0.2 0.8 0.2 1" type="cylinder"/>
+        </default>
+        <default class="payload">
+            <geom rgba="0.8 0.2 0.2 1" type="box"/>
+        </default>
+    </default>
+    
+    <asset>
+        <material name="grid" texture="grid" texrepeat="8 8" texuniform="true"/>
+        <texture name="grid" type="2d" builtin="checker" width="512" height="512" 
+                 rgb1="0.1 0.2 0.3" rgb2="0.2 0.3 0.4"/>
+    </asset>
+    
+    <worldbody>
+        <geom name="floor" type="plane" size=")" << globals.WORLD_SZ/2 << " " << globals.WORLD_SZ/2 << R"( 0.1" material="grid"/>
+        <light diffuse=".8 .8 .8" pos="0 0 4" dir="0 0 -1"/>
+        
+        <!-- 这里会动态添加机器人和载荷 -->
+)";
+
+    // 添加现有机器人
+    for (const auto& [rid, robot] : robots_) {
+        xml << generateRobotXML(rid, Eigen::Vector2d(robot->position_(0), robot->position_(1)), robot->robot_radius_);
+    }
+    
+    // 添加现有载荷
+    for (const auto& [pid, payload] : payloads_) {
+        xml << generatePayloadXML(pid, payload->position_, payload->width_, payload->height_);
+    }
+    
+    xml << R"(    </worldbody>
+</mujoco>)";
+    
+    return xml.str();
+}
+
+std::string Simulator::generateRobotXML(int robot_id, const Eigen::Vector2d& pos, double radius) {
+    std::ostringstream xml;
+    xml << R"(        <body name="robot_)" << robot_id << R"(" pos=")" << pos.x() << " " << pos.y() << R"( 0.1">)"
+        << R"(<freejoint name="robot_joint_)" << robot_id << R"("/>)"
+        << R"(<geom name="robot_geom_)" << robot_id << R"(" class="robot" size=")" << radius << R"( 0.1"/>)"
+        << R"(</body>)" << std::endl;
+    return xml.str();
+}
+
+std::string Simulator::generatePayloadXML(int payload_id, const Eigen::Vector2d& pos, double width, double height) {
+    std::ostringstream xml;
+    xml << R"(        <body name="payload_)" << payload_id << R"(" pos=")" << pos.x() << " " << pos.y() << R"( 0.5">)"
+        << R"(<freejoint name="payload_joint_)" << payload_id << R"("/>)"
+        << R"(<geom name="payload_geom_)" << payload_id << R"(" class="payload" size=")" 
+        << width/2 << " " << height/2 << R"( 0.5"/>)"
+        << R"(</body>)" << std::endl;
+    return xml.str();
+}
+
+void Simulator::destroyMuJoCo() {
+    if (mujoco_data_) {
+        mj_deleteData(mujoco_data_);
+        mujoco_data_ = nullptr;
+    }
+    
+    if (mujoco_model_) {
+        mj_deleteModel(mujoco_model_);
+        mujoco_model_ = nullptr;
+    }
+    
+    if (mujoco_window_) {
+        glfwDestroyWindow(mujoco_window_);
+        mujoco_window_ = nullptr;
+        glfwTerminate();
+    }
+}
+
+void Simulator::stepMuJoCo() {
+    if (!mujoco_model_ || !mujoco_data_) return;
+    
+    // 执行MuJoCo物理步进
+    mj_step(mujoco_model_, mujoco_data_);
+}
+
+void Simulator::renderMuJoCo() {
+    if (!mujoco_window_ || !mujoco_model_ || !mujoco_data_) return;
+    
+    // 获取窗口尺寸
+    int width, height;
+    glfwGetFramebufferSize(mujoco_window_, &width, &height);
+    mjrRect viewport = {0, 0, width, height};
+    
+    // 更新场景
+    mjv_updateScene(mujoco_model_, mujoco_data_, &mujoco_opt_, nullptr, 
+                    &mujoco_cam_, mjCAT_ALL, &mujoco_scn_);
+    
+    // 渲染
+    mjr_render(viewport, &mujoco_scn_, &mujoco_con_);
+    
+    // 交换缓冲区
+    glfwSwapBuffers(mujoco_window_);
+    glfwPollEvents();
+}
+
 
 /*******************************************************************************/
 // Drawing graphics.
@@ -180,52 +346,124 @@ void Simulator::moveRobot(){
 }
 
 bool Simulator::isRobotContactingPayload(int robot_id, int payload_id) {
-    // 获取机器人和payload的物理体
     auto robot_it = robots_.find(robot_id);
     auto payload_it = payloads_.find(payload_id);
     
     if (robot_it == robots_.end() || payload_it == payloads_.end()) {
-        return false; // 机器人或payload不存在
+        return false;
     }
     
-    b2Body* robot_body = robot_it->second->physicsBody_;
-    b2Body* payload_body = payload_it->second->physicsBody_;
+    auto robot_mujoco_it = robot_to_mujoco_id_.find(robot_id);
+    auto payload_mujoco_it = payload_to_mujoco_id_.find(payload_id);
     
-    if (!robot_body || !payload_body) {
-        return false; // 物理体不存在
+    if (robot_mujoco_it == robot_to_mujoco_id_.end() || 
+        payload_mujoco_it == payload_to_mujoco_id_.end()) {
+        return false;
     }
     
-    // 遍历机器人的所有接触
-    for (b2ContactEdge* edge = robot_body->GetContactList(); edge; edge = edge->next) {
-        if (edge->other == payload_body && edge->contact->IsTouching()) {
-            return true; // 找到接触
-        }
-    }
-    
-    return false; // 没有接触
+    return areInContactMuJoCo(robot_mujoco_it->second, payload_mujoco_it->second);
 }
 
-std::pair<Eigen::Vector2d, Eigen::Vector2d> Simulator::getContactPoint(int robot_id, int payload_id){
-    auto robot_it = robots_.find(robot_id);
-    auto payload_it = payloads_.find(payload_id);
-
-    b2Body* robot_body = robot_it->second->physicsBody_;
-    b2Body* payload_body = payload_it->second->physicsBody_;
-
-    for (b2ContactEdge *edge = robot_body->GetContactList(); edge; edge=edge->next){
-        b2WorldManifold worldManifold;
-        edge->contact->GetWorldManifold(&worldManifold);
-
-        b2Vec2 contactPoint = worldManifold.points[0];
-        Eigen::Vector2d point(contactPoint.x, contactPoint.y);
-        b2Vec2 normal = worldManifold.normal;
-        if (edge->contact->GetFixtureA()->GetBody() == robot_body) {
-            return {point, Eigen::Vector2d(normal.x, normal.y)};
-        } else{
-            return {point, Eigen::Vector2d(-normal.x, -normal.y)};
+bool Simulator::areInContactMuJoCo(int body1_id, int body2_id) const {
+    if (!mujoco_model_ || !mujoco_data_) return false;
+    
+    // 检查MuJoCo接触列表
+    for (int i = 0; i < mujoco_data_->ncon; i++) {
+        mjContact& con = mujoco_data_->contact[i];
+        
+        // 获取接触涉及的body ID
+        int geom1_body = mujoco_model_->geom_bodyid[con.geom1];
+        int geom2_body = mujoco_model_->geom_bodyid[con.geom2];
+        
+        // 检查是否是我们关心的两个body之间的接触
+        if ((geom1_body == body1_id && geom2_body == body2_id) ||
+            (geom1_body == body2_id && geom2_body == body1_id)) {
+            
+            // 检查接触距离（负值表示穿透，即真实接触）
+            if (con.dist <= 0) {
+                return true;
+            }
         }
     }
+    
+    return false;
+}
+
+std::pair<Eigen::Vector2d, Eigen::Vector2d> Simulator::getContactPoint(int robot_id, int payload_id) {
+    auto robot_mujoco_it = robot_to_mujoco_id_.find(robot_id);
+    auto payload_mujoco_it = payload_to_mujoco_id_.find(payload_id);
+    
+    if (robot_mujoco_it == robot_to_mujoco_id_.end() || 
+        payload_mujoco_it == payload_to_mujoco_id_.end()) {
+        return {Eigen::Vector2d::Zero(), Eigen::Vector2d::Zero()};
+    }
+    
+    return getContactInfoMuJoCo(robot_mujoco_it->second, payload_mujoco_it->second);
+}
+
+std::pair<Eigen::Vector2d, Eigen::Vector2d> Simulator::getContactInfoMuJoCo(int body1_id, int body2_id) const {
+    if (!mujoco_model_ || !mujoco_data_) {
+        return {Eigen::Vector2d::Zero(), Eigen::Vector2d::Zero()};
+    }
+    
+    // 查找两个body之间的接触
+    for (int i = 0; i < mujoco_data_->ncon; i++) {
+        mjContact& con = mujoco_data_->contact[i];
+        
+        int geom1_body = mujoco_model_->geom_bodyid[con.geom1];
+        int geom2_body = mujoco_model_->geom_bodyid[con.geom2];
+        
+        if ((geom1_body == body1_id && geom2_body == body2_id) ||
+            (geom1_body == body2_id && geom2_body == body1_id)) {
+            
+            if (con.dist <= 0) {  // 真实接触
+                // 接触点位置
+                Eigen::Vector2d contact_point(con.pos[0], con.pos[1]);
+                
+                // 接触法向量（从body1指向body2）
+                Eigen::Vector2d contact_normal(con.frame[0], con.frame[1]);
+                
+                // 确保法向量方向正确（从body1指向body2）
+                if (geom1_body == body2_id && geom2_body == body1_id) {
+                    contact_normal = -contact_normal;
+                }
+                
+                return {contact_point, contact_normal};
+            }
+        }
+    }
+    
     return {Eigen::Vector2d::Zero(), Eigen::Vector2d::Zero()};
+}
+
+void Simulator::applyForcesToPayloadMuJoCo(std::shared_ptr<Payload> payload, 
+                                          const Eigen::VectorXd& forces,
+                                          const std::vector<Eigen::Vector2d>& contact_points,
+                                          const std::vector<Eigen::Vector2d>& contact_normals) {
+    if (payload->mujoco_body_id_ < 0) return;
+    
+    // 清零当前施加的力
+    for (int i = 0; i < 6; i++) {
+        mujoco_data_->xfrc_applied[payload->mujoco_body_id_ * 6 + i] = 0.0;
+    }
+    
+    // 遍历所有接触点，施加对应的力
+    for (int i = 0; i < forces.size() && i < contact_points.size() && i < contact_normals.size(); i++) {
+        if (forces(i) > 0.01) { // 只施加显著的力
+            // 计算力向量
+            Eigen::Vector2d force_vector = forces(i) * contact_normals[i];
+            
+            // 计算相对于payload质心的力矩
+            Eigen::Vector2d payload_center = payload->getMuJoCoPosition();
+            Eigen::Vector2d r = contact_points[i] - payload_center;
+            double torque = r.x() * force_vector.y() - r.y() * force_vector.x();
+            
+            // 累加到总的外力和力矩
+            mujoco_data_->xfrc_applied[payload->mujoco_body_id_ * 6 + 0] += force_vector.x(); // fx
+            mujoco_data_->xfrc_applied[payload->mujoco_body_id_ * 6 + 1] += force_vector.y(); // fy
+            mujoco_data_->xfrc_applied[payload->mujoco_body_id_ * 6 + 5] += torque;           // τz
+        }
+    }
 }
 
 Eigen::VectorXd Simulator::solveConstrainedLeastSquares(const Eigen::MatrixXd &G, const Eigen::Vector3d& w_cmd) {
@@ -315,46 +553,69 @@ void Simulator::applyForcesToPayload(std::shared_ptr<Payload> payload,
                                    const Eigen::VectorXd& forces,
                                    const std::vector<Eigen::Vector2d>& contact_points,
                                    const std::vector<Eigen::Vector2d>& contact_normals) {
-    if (!payload->physicsBody_) return;
-    
-    // 遍历所有接触点，施加对应的力
-    for (int i = 0; i < forces.size() && i < contact_points.size(); i++) {
-        if (forces(i) > 0.01) { // 只施加显著的力
-            // 计算力向量
-            Eigen::Vector2d force_vector = forces(i) * contact_normals[i];
-            
-            // 转换为Box2D格式
-            b2Vec2 force_b2(force_vector.x(), force_vector.y());
-            b2Vec2 point_b2(contact_points[i].x(), contact_points[i].y());
-            
-            // 施加力到指定点
-            payload->physicsBody_->ApplyForce(force_b2, point_b2, true);
-        }
-    }
+    // 直接调用MuJoCo版本
+    applyForcesToPayloadMuJoCo(payload, forces, contact_points, contact_normals);
 }
 
+bool Simulator::initializeMuJoCoVisualization() {
+    // 初始化GLFW
+    if (!glfwInit()) {
+        std::cerr << "Failed to initialize GLFW for MuJoCo visualization" << std::endl;
+        return false;
+    }
+    
+    // 创建MuJoCo可视化窗口
+    mujoco_window_ = glfwCreateWindow(800, 600, "MuJoCo Physics Visualization", nullptr, nullptr);
+    if (!mujoco_window_) {
+        std::cerr << "Failed to create MuJoCo window" << std::endl;
+        glfwTerminate();
+        return false;
+    }
+    
+    glfwMakeContextCurrent(mujoco_window_);
+    
+    // 初始化MuJoCo可视化组件
+    mjv_defaultCamera(&mujoco_cam_);
+    mjv_defaultOption(&mujoco_opt_);
+    mjv_defaultScene(&mujoco_scn_);
+    mjr_defaultContext(&mujoco_con_);
+    
+    // 设置场景
+    mjv_makeScene(mujoco_model_, &mujoco_scn_, 2000);
+    mjr_makeContext(mujoco_model_, &mujoco_con_, mjFONTSCALE_150);
+    
+    // 设置相机位置
+    mujoco_cam_.azimuth = 90;
+    mujoco_cam_.elevation = -45;
+    mujoco_cam_.distance = 50;
+    mujoco_cam_.lookat[0] = 0;
+    mujoco_cam_.lookat[1] = 0;
+    mujoco_cam_.lookat[2] = 0;
+    
+    std::cout << "MuJoCo visualization initialized" << std::endl;
+    return true;
+}
 
 void Simulator::applyDirectPayloadVelocityControl() {
     for (auto& [pid, payload] : payloads_) {
-        if (!payload->physicsBody_) continue;
+        if (payload->mujoco_body_id_ < 0) continue;
         
         // 计算期望的线速度和角速度
         Eigen::Vector2d desired_velocity = computeDesiredPayloadVelocity(payload);
         double desired_angular_velocity = computeDesiredPayloadAngularVelocity(payload);
         
         // 直接设置payload的速度（Box2D提供的功能）
-        b2Vec2 new_linear_velocity(desired_velocity.x(), desired_velocity.y());
-        payload->physicsBody_->SetLinearVelocity(new_linear_velocity);
-        payload->physicsBody_->SetAngularVelocity(desired_angular_velocity);
+        payload->setMuJoCoVelocity(desired_velocity);
+        payload->setMuJoCoAngularVelocity(desired_angular_velocity);
         
         // 调试输出
         static int debug_counter = 0;
         if (debug_counter++ % 60 == 0) {  // 每60帧输出一次
-            b2Vec2 current_velocity = payload->physicsBody_->GetLinearVelocity();
-            double current_angular_velocity = payload->physicsBody_->GetAngularVelocity();
+            Eigen::Vector2d current_velocity = payload->getMuJoCoVelocity();
+            double current_angular_velocity = payload->getMuJoCoAngularVelocity();
             
             std::cout << "Direct velocity control - Set vel: (" << desired_velocity.x() << ", " << desired_velocity.y() 
-                      << "), Actual vel: (" << current_velocity.x << ", " << current_velocity.y << ")" << std::endl;
+                        << "), Actual vel: (" << current_velocity.x() << ", " << current_velocity.y() << ")" << std::endl;
             std::cout << "Angular - Set: " << desired_angular_velocity 
                       << ", Actual: " << current_angular_velocity << std::endl;
         }
@@ -401,63 +662,191 @@ double Simulator::computeDesiredPayloadAngularVelocity(std::shared_ptr<Payload> 
 void Simulator::timestep() {
     if (globals.SIM_MODE != Timestep) return;
     
-    // 根据配置选择控制方法
-    if (globals.USE_DIRECT_PAYLOAD_VELOCITY) {
+    // ========== 1. 控制方法选择 ==========
+    // 根据配置选择不同的payload控制方法
+    if (globals.USE_FORCE_ALLOCATION && globals.FORMATION == "Payload") {
+        // 基于因子图的力分配控制
+        updateForceAllocationSystem();
+        
+        // 计算接触点几何参数（如果需要）
+        for (auto [r_id, robot] : robots_) {
+            robot->updateContactForceGeometry();
+        }
+        
+    } else if (globals.USE_DIRECT_PAYLOAD_VELOCITY) {
+        // 直接速度控制（绕过因子图）
         applyDirectPayloadVelocityControl();
+        
     } else if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
+        // 使用PayloadTwistFactor的分布式控制
         updateDistributedPayloadControl();
+        
     } else {
+        // 默认：集中式最小二乘力分配
         computeLeastSquares();
     }
     
+    // ========== 2. 机器人邻居关系计算 ==========
     calculateRobotNeighbours(robots_);
     
-    // 更新因子几何参数（一次性）
+    // ========== 3. 因子几何参数更新（一次性设置）==========
     static bool geometry_updated = false;
-    if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY && !geometry_updated) {
+    if ((globals.USE_DISTRIBUTED_PAYLOAD_CONTROL || globals.USE_FORCE_ALLOCATION) && 
+        !globals.USE_DIRECT_PAYLOAD_VELOCITY && !geometry_updated) {
+        
         for (auto [r_id, robot] : robots_) {
-            robot->updatePayloadFactorGeometry();  // 更新几何参数
+            // 更新PayloadTwistFactor几何参数
+            if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
+                robot->updatePayloadFactorGeometry();
+            }
+            
+            // 更新ForceAllocationFactor几何参数
+            if (globals.USE_FORCE_ALLOCATION) {
+                robot->updateContactForceGeometry();
+            }
         }
         geometry_updated = true;
+        std::cout << "Factor geometry parameters updated" << std::endl;
     }
     
-    // 更新因子连接（如果还需要的话）
-    if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
+    // ========== 4. 因子图连接更新 ==========
+    if ((globals.USE_DISTRIBUTED_PAYLOAD_CONTROL || globals.USE_FORCE_ALLOCATION) && 
+        !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
+        
         for (auto [r_id, robot] : robots_) {
-            robot->updateInterrobotFactors();  // 机器人间因子
+            // 更新机器人间因子（避免碰撞等）
+            robot->updateInterrobotFactors();
+            
+            // 如果使用力分配，可能需要更新力分配相关的连接
+            // （通常ForceAllocationFactor在创建时就建立了所有必要连接）
         }
     }
     
+    // ========== 5. 通信故障模拟 ==========
     setCommsFailure(globals.COMMS_FAILURE_RATE);
     
-    // GBP迭代
-    if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
+    // ========== 6. 因子图优化（GBP迭代）==========
+    if ((globals.USE_DISTRIBUTED_PAYLOAD_CONTROL || globals.USE_FORCE_ALLOCATION) && 
+        !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
         
+        // 执行多轮GBP迭代
         for (int i = 0; i < globals.NUM_ITERS; i++) {
+            // 内部迭代：机器人内部的变量和因子
             iterateGBP(1, INTERNAL, robots_);
+            
+            // 外部迭代：机器人间的协调因子
             iterateGBP(1, EXTERNAL, robots_);
         }
         
-        // 更新机器人状态
+        // ========== 7. 机器人状态更新 ==========
         for (auto [r_id, robot] : robots_) {
+            // 更新地平线状态（目标导向）
             robot->updateHorizon();
+            
+            // 更新当前状态（执行计划的第一步）
             robot->updateCurrent();
         }
-    }
-    
-    // 物理世界更新保持不变
-    if (physicsWorld_) {
-        physicsWorld_->Step(globals.TIMESTEP, 8, 3);
-        for (auto [r_id, robot] : robots_) {
-            robot->syncPhysicsToLogical();
-        }
-        for (auto [p_id, payload] : payloads_) {
-            payload->update();
+        
+        // 可选：更新payload变量的先验（如果使用PayloadTwistFactor）
+        if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
+            for (auto [r_id, robot] : robots_) {
+                robot->updatePayloadTwistPriors();
+            }
         }
     }
     
+    // ========== 8. MUJOCO物理世界更新 ==========
+    stepMuJoCo();  // MuJoCo物理步进
+    
+    // 同步物理状态到逻辑状态
+    for (auto [r_id, robot] : robots_) {
+        robot->syncPhysicsToLogical();  // 内部调用syncFromMuJoCo()
+    }
+    
+    // 更新payload状态
+    for (auto [p_id, payload] : payloads_) {
+        payload->update();  // 内部调用syncFromMuJoCo()
+    }
+    
+    // ========== 9. 调试信息输出 ==========
+    static int debug_counter = 0;
+    if (debug_counter++ % 120 == 0) {  // 每2秒输出一次
+        std::cout << "\n=== Timestep " << clock_ << " Debug Info ===" << std::endl;
+        
+        if (globals.USE_FORCE_ALLOCATION && !payloads_.empty()) {
+            // 输出力分配信息
+            auto payload = payloads_.begin()->second;
+            std::cout << "Payload position: (" << payload->getPosition().transpose() << ")" << std::endl;
+            std::cout << "Target position: (" << payload->target_position_.transpose() << ")" << std::endl;
+            
+            // 输出各机器人的接触力
+            for (auto [r_id, robot] : robots_) {
+                if (!robot->contact_force_variables_.empty()) {
+                    double contact_force = robot->contact_force_variables_[0]->mu_(0);
+                    std::cout << "Robot " << r_id << " contact force: " << contact_force << std::endl;
+                }
+            }
+        }
+        
+        if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
+            // 输出payload twist信息
+            for (auto [r_id, robot] : robots_) {
+                if (!robot->payload_twist_variables_.empty()) {
+                    auto twist_var = robot->payload_twist_variables_[0];
+                    std::cout << "Robot " << r_id << " payload twist: [" 
+                              << twist_var->mu_.transpose() << "]" << std::endl;
+                }
+            }
+        }
+        
+        std::cout << "Control mode: ";
+        if (globals.USE_FORCE_ALLOCATION) std::cout << "Force Allocation";
+        else if (globals.USE_DIRECT_PAYLOAD_VELOCITY) std::cout << "Direct Velocity";
+        else if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) std::cout << "Distributed Twist";
+        else std::cout << "Centralized Least Squares";
+        std::cout << std::endl;
+        
+        // 输出当前使用的物理引擎
+        std::cout << "Physics engine: MuJoCo" << std::endl;
+    }
+    
+    // ========== 10. 任务完成检查 ==========
+    if (globals.FORMATION == "Payload" && !payloads_.empty()) {
+        auto payload = payloads_.begin()->second;
+        
+        // 检查是否到达目标
+        Eigen::Vector2d position_error = payload->target_position_ - payload->position_;
+        double rotation_error = std::abs(payload->getRotationError());
+        
+        if (position_error.norm() < 0.5 && rotation_error < 0.1) {
+            payload->task_completed_ = true;
+            
+            static bool completion_logged = false;
+            if (!completion_logged) {
+                std::cout << "\n🎉 Payload manipulation task completed! 🎉" << std::endl;
+                std::cout << "Final position error: " << position_error.norm() << std::endl;
+                std::cout << "Final rotation error: " << rotation_error << " rad" << std::endl;
+                completion_logged = true;
+            }
+        }
+    }
+    
+    // ========== 11. 时间推进和终止条件 ==========
     clock_++;
-    if (clock_ >= globals.MAX_TIME) globals.RUN = false;
+    
+    if (clock_ >= globals.MAX_TIME) {
+        std::cout << "\nSimulation completed after " << globals.MAX_TIME << " timesteps." << std::endl;
+        globals.RUN = false;
+    }
+    
+    // 可选：基于任务完成情况的早期终止
+    if (globals.FORMATION == "Payload" && !payloads_.empty()) {
+        auto payload = payloads_.begin()->second;
+        if (payload->task_completed_ && clock_ > 100) {  // 至少运行100步
+            std::cout << "\nTask completed! Ending simulation early." << std::endl;
+            globals.RUN = false;
+        }
+    }
 }
 
 // 简化 updateDistributedPayloadControl()
@@ -555,244 +944,217 @@ void Simulator::eventHandler(){
     graphics->update_camera();
 }
 
-void Simulator::createSingleRobot(){
-    // Create a single robot at the specified position
-    if (!new_robots_needed_) return;
-    new_robots_needed_ = false;
-    std::vector<std::shared_ptr<Robot>> robots_to_create{};
-    Eigen::VectorXd starting = Eigen::VectorXd{{-25., 0., 0.,0.}};
-    Eigen::VectorXd ending = Eigen::VectorXd{{25., 0., 0.,0.}};
-    // print the starting and ending positions
-    std::cout << "Starting: " << starting.transpose() << std::endl;
-    std::cout << "Ending: " << ending.transpose() << std::endl;
-    std::deque<Eigen::VectorXd> waypoints{starting, ending};
-    float robot_radius = globals.ROBOT_RADIUS;
-    Color robot_color = ColorFromHSV(0, 1., 0.75);
-    robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
-    for (auto& robot : robots_to_create) {
-        robots_[robot->rid_] = robot;
-        robot_positions_[robot->rid_] = std::vector<double>{robot->position_(0), robot->position_(1)};
-    }
-}
-
 /*******************************************************************************/
 // Create new robots if needed. Handles deletion of robots out of bounds. 
 // New formations must modify the vectors "robots to create" and optionally "robots_to_delete"
 // by appending (push_back()) a shared pointer to a Robot class.
 /*******************************************************************************/
-
-
 void Simulator::createOrDeleteRobots(){
     if (!new_robots_needed_) return;
 
     std::vector<std::shared_ptr<Robot>> robots_to_create{};
-    std::vector<std::shared_ptr<Robot>> robots_to_delete{};
-    Eigen::VectorXd starting, turning, ending; // Waypoints : [x,y,xdot,ydot].
-
-    if (globals.FORMATION=="circle"){
-        // Robots must travel to opposite sides of circle
+    
+    // 只保留Payload formation
+    if (globals.FORMATION == "Payload") {
         new_robots_needed_ = false;
-        float min_circumference_spacing = 5.*globals.ROBOT_RADIUS;
-        double min_radius = 0.25 * globals.WORLD_SZ;
-        Eigen::VectorXd centre{{0., 0., 0.,0.}};
-        for (int i=0; i<globals.NUM_ROBOTS; i++){
-            // Select radius of large circle to be at least min_radius,
-            // Also ensures that robots in the circle are at least min_circumference_spacing away from each other
-            float radius_circle = (globals.NUM_ROBOTS==1) ? min_radius : 
-                std::max(min_radius, sqrt(min_circumference_spacing / (2. - 2.*cos(2.*PI/(double)globals.NUM_ROBOTS))));
-            Eigen::VectorXd offset_from_centre = Eigen::VectorXd{{radius_circle * cos(2.*PI*i/(float)globals.NUM_ROBOTS)},
-                                                            {radius_circle * sin(2.*PI*i/(float)globals.NUM_ROBOTS)},
-                                                            {0.},{0.}};
-            starting = centre + offset_from_centre;
-            ending = centre - offset_from_centre;
-            // print the starting and ending positions
-            std::cout << "Starting: " << starting.transpose() << std::endl;
-            std::cout << "Ending: " << ending.transpose() << std::endl;
-            std::deque<Eigen::VectorXd> waypoints{starting, ending};
-            
-            // Define robot radius and colour here.
-            float robot_radius = globals.ROBOT_RADIUS;
-            Color robot_color = ColorFromHSV(i*360./(float)globals.NUM_ROBOTS, 1., 0.75);
-            robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
-        }
-    } else if (globals.FORMATION == "Payload") {
-        new_robots_needed_ = false;
-        float robot_radius = globals.ROBOT_RADIUS;
         
-        // 获取payload信息
         if (payloads_.empty()) return;
-        
-        // *** 删除：不再在simulator中创建twist variables ***
-        // createPayloadTwistVariable() 调用已删除
         
         auto payload = payloads_.begin()->second;
         auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
         
-        if (contact_points.empty()) {
-            std::cout << "Warning: No contact points available for payload" << std::endl;
-            return;
-        }
+        if (contact_points.empty()) return;
         
-        // 创建机器人（每个robot会在构造函数中自动创建payload variables）
-        std::cout << "Creating robots for payload formation..." << std::endl;
+        // 创建机器人
         for (int i = 0; i < globals.NUM_ROBOTS; i++) {
             int contact_point_index = i % contact_points.size();
-            
-            // 获取对应的接触点和法向量
             Eigen::Vector2d contact_point = contact_points[contact_point_index];
             Eigen::Vector2d contact_normal = contact_normals[contact_point_index];
             
-            // 机器人初始位置：接触点 - 机器人半径 * 法向量
-            Eigen::Vector2d robot_start_pos = contact_point - robot_radius * contact_normal;
+            // 机器人初始位置
+            Eigen::Vector2d robot_start_pos = contact_point - globals.ROBOT_RADIUS * contact_normal;
             
             Eigen::VectorXd starting(4);
             starting << robot_start_pos.x(), robot_start_pos.y(), 0.0, 0.0;
             
-            Eigen::VectorXd ending = starting;
+            std::deque<Eigen::VectorXd> waypoints{starting, starting};  // 起点=终点
+            Color robot_color = ColorFromHSV(contact_point_index * 90.0f, 1.0f, 0.75f);  // 简化颜色
             
-            std::deque<Eigen::VectorXd> waypoints{starting, ending};
-            
-            Color robot_color = ColorFromHSV(contact_point_index * 360.0f / contact_points.size(), 1.0f, 0.75f);
-            
-            auto robot = std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld());
-            
-            // 分配接触点索引
+            auto robot = std::make_shared<Robot>(this, next_rid_++, waypoints, globals.ROBOT_RADIUS, robot_color);
             robot->assigned_contact_point_index_ = contact_point_index;
-            
             robots_to_create.push_back(robot);
-            
-            std::cout << "Robot " << robot->rid_ << " assigned to contact point " << contact_point_index 
-                      << " at position (" << contact_point.x() << ", " << contact_point.y() << ")" << std::endl;
         }
-        
-    } else if (globals.FORMATION=="junction"){
-        // Robots in a cross-roads style junction. There is only one-way traffic, and no turning.        
-        new_robots_needed_ = true;      // This is needed so that more robots can be created as the simulation progresses.
-        if (clock_%20==0){              // Arbitrary condition on the simulation time to create new robots
-            int n_roads = 2;
-            int road = random_int(0,n_roads-1);
-            Eigen::Matrix4d rot; rot.setZero();
-            rot.topLeftCorner(2,2) << cos(PI/2.*road), -sin(PI/2.*road), sin(PI/2.*road), cos(PI/2.*road);
-            rot.bottomRightCorner(2,2) << cos(PI/2.*road), -sin(PI/2.*road), sin(PI/2.*road), cos(PI/2.*road);
-
-            int n_lanes = 2;
-            int lane = random_int(0,n_lanes-1);
-            double lane_width = 4.*globals.ROBOT_RADIUS;
-            double lane_v_offset = (0.5*(1-n_lanes)+lane)*lane_width;
-            starting = rot * Eigen::VectorXd{{-globals.WORLD_SZ/2., lane_v_offset, globals.MAX_SPEED, 0.}};
-            ending = rot * Eigen::VectorXd{{(double)globals.WORLD_SZ, lane_v_offset, 0., 0.}};
-            std::deque<Eigen::VectorXd> waypoints{starting, ending};
-            float robot_radius = globals.ROBOT_RADIUS;
-            Color robot_color = DARKGREEN;
-            robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
-        }
-
-        // Delete robots if out of bounds
-        for (auto [rid, robot] : robots_){
-            if (abs(robot->position_(0))>globals.WORLD_SZ/2 || abs(robot->position_(1))>globals.WORLD_SZ/2){
-                robots_to_delete.push_back(robot);
-            }
-        }
-
-    } else if (globals.FORMATION=="junction_twoway"){
-        // Robots in a two-way junction, turning LEFT (RED), RIGHT (BLUE) or STRAIGHT (GREEN)
-        new_robots_needed_ = true;   // This is needed so that more robots can be created as the simulation progresses.
-        if (clock_%20==0){           // Arbitrary condition on the simulation time to create new robots
-            int n_roads = 4;
-            int road = random_int(0,n_roads-1);
-            // We will define one road (the one going left) and then we can rotate the positions for other roads.
-            Eigen::Matrix4d rot; rot.setZero();
-            rot.topLeftCorner(2,2) << cos(PI/2.*road), -sin(PI/2.*road), sin(PI/2.*road), cos(PI/2.*road);
-            rot.bottomRightCorner(2,2) << cos(PI/2.*road), -sin(PI/2.*road), sin(PI/2.*road), cos(PI/2.*road);
-
-            int n_lanes = 2;
-            int lane = random_int(0,n_lanes-1);
-            int turn = random_int(0,2);
-            double lane_width = 4.*globals.ROBOT_RADIUS;
-            double lane_v_offset = (0.5*(1-2.*n_lanes)+lane)*lane_width;
-            double lane_h_offset = (1-turn)*(0.5+lane-n_lanes)*lane_width;
-            starting = rot * Eigen::VectorXd{{-globals.WORLD_SZ/2., lane_v_offset, globals.MAX_SPEED, 0.}};
-            turning = rot * Eigen::VectorXd{{lane_h_offset, lane_v_offset, (turn%2)*globals.MAX_SPEED, (turn-1)*globals.MAX_SPEED}};
-            ending = rot * Eigen::VectorXd{{lane_h_offset + (turn%2)*globals.WORLD_SZ*1., lane_v_offset + (turn-1)*globals.WORLD_SZ*1., 0., 0.}};
-            std::deque<Eigen::VectorXd> waypoints{starting, turning, ending};
-            float robot_radius = globals.ROBOT_RADIUS;
-            Color robot_color = ColorFromHSV(turn*120., 1., 0.75);
-            robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
-        }
-        
-        // Delete robots if out of bounds
-        for (auto [rid, robot] : robots_){
-            if (abs(robot->position_(0))>globals.WORLD_SZ/2 || abs(robot->position_(1))>globals.WORLD_SZ/2){
-                robots_to_delete.push_back(robot);
-            }
-        }
-    } else {
-        print("Shouldn't reach here, formation not defined!");
-        // Define new formations here!
-    }        
+    }
     
-    // ========== 通用机器人创建流程 ==========
-    // 1. 首先创建所有机器人并添加到系统中
-    std::cout << "Adding " << robots_to_create.size() << " robots to system..." << std::endl;
+    // 添加机器人到系统
     for (auto robot : robots_to_create){
         robot_positions_[robot->rid_] = std::vector<double>{robot->waypoints_[0](0), robot->waypoints_[0](1)};
         robots_[robot->rid_] = robot;
-        std::cout << "Added robot " << robot->rid_ << " to system" << std::endl;
+        model_needs_rebuild_ = true;
     }
     
-    // 2. 针对 Payload formation 的特殊处理
-    if (globals.FORMATION == "Payload" && !payloads_.empty()) {
-        std::cout << "Setting up payload-specific connections..." << std::endl;
+    // 重建MuJoCo模型
+    if (model_needs_rebuild_) {
+        rebuildMuJoCoModel();
+        model_needs_rebuild_ = false;
+    }
+}
+
+bool Simulator::rebuildMuJoCoModel() {
+    std::cout << "Rebuilding MuJoCo model with " << robots_.size() << " robots and " 
+              << payloads_.size() << " payloads..." << std::endl;
+    
+    // 重新生成XML并加载模型
+    std::string xml_content = generateMuJoCoXML();
+    bool success = loadMuJoCoModel(xml_content);
+    
+    if (success) {
+        updateEntityReferences();
+    }
+    
+    return success;
+}
+
+void Simulator::updateEntityReferences() {
+    // 清空映射
+    robot_to_mujoco_id_.clear();
+    payload_to_mujoco_id_.clear();
+    mujoco_to_robot_id_.clear();
+    mujoco_to_payload_id_.clear();
+    
+    // 为机器人建立ID映射
+    for (auto& [rid, robot] : robots_) {
+        std::string robot_name = "robot_" + std::to_string(rid);
+        int mujoco_id = mj_name2id(mujoco_model_, mjOBJ_BODY, robot_name.c_str());
         
-        auto payload = payloads_.begin()->second;
-        auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
-        
-        // 2.1 更新每个机器人的PayloadTwistFactor几何参数
-        for (auto robot : robots_to_create) {
-            std::cout << "Updating payload factor geometry for robot " << robot->rid_ << std::endl;
-            robot->updatePayloadFactorGeometry();  // 设置正确的几何参数
-        }
-        
-        // 2.2 可选：设置刚性连接（如果启用）
-        if (globals.USE_RIGID_ATTACHMENT) {
-            std::cout << "Setting up rigid attachments..." << std::endl;
-            for (auto robot : robots_to_create) {
-                int contact_index = robot->assigned_contact_point_index_;
-                if (contact_index < contact_points.size()) {
-                    Eigen::Vector2d attach_point = contact_points[contact_index];
-                    robot->attachToPayload(payload, attach_point);
-                    std::cout << "Robot " << robot->rid_ 
-                              << " attached to payload via Box2D joint (rigid attachment enabled)" << std::endl;
-                }
-            }
+        if (mujoco_id >= 0) {
+            robot_to_mujoco_id_[rid] = mujoco_id;
+            mujoco_to_robot_id_[mujoco_id] = rid;
+            robot->mujoco_body_id_ = mujoco_id;
+            robot->setMuJoCoReferences(mujoco_model_, mujoco_data_);
+            
+            std::cout << "Robot " << rid << " mapped to MuJoCo body " << mujoco_id << std::endl;
         } else {
-            std::cout << "Rigid attachment disabled - robots will rely purely on factor-based control" << std::endl;
+            std::cerr << "Failed to find MuJoCo body for robot " << rid << std::endl;
+        }
+    }
+    
+    // 为载荷建立ID映射
+    for (auto& [pid, payload] : payloads_) {
+        std::string payload_name = "payload_" + std::to_string(pid);
+        int mujoco_id = mj_name2id(mujoco_model_, mjOBJ_BODY, payload_name.c_str());
+        
+        if (mujoco_id >= 0) {
+            payload_to_mujoco_id_[pid] = mujoco_id;
+            mujoco_to_payload_id_[mujoco_id] = pid;
+            payload->mujoco_body_id_ = mujoco_id;
+            payload->setMuJoCoReferences(mujoco_model_, mujoco_data_);
+            
+            std::cout << "Payload " << pid << " mapped to MuJoCo body " << mujoco_id << std::endl;
+        } else {
+            std::cerr << "Failed to find MuJoCo body for payload " << pid << std::endl;
+        }
+    }
+}
+
+
+void Simulator::createForceAllocationFactors() {
+    if (payloads_.empty() || robots_.empty()) return;
+    
+    auto payload = payloads_.begin()->second;
+    auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
+    
+    int n_robots = robots_.size();
+    int n_contacts = contact_points.size();
+    
+    std::cout << "Creating force allocation factor: " << n_robots 
+              << " robots, " << n_contacts << " contact points" << std::endl;
+    
+    // 为每个时间步创建一个ForceAllocationFactor
+    // 每个因子连接所有机器人在该时间步的接触力变量
+    for (int t = 0; t < 15; t++) {  // 假设15个时间步
+        std::vector<std::shared_ptr<Variable>> force_variables;
+        
+        for (auto [rid, robot] : robots_) {
+            if (t < robot->contact_force_variables_.size()) {
+                force_variables.push_back(robot->contact_force_variables_[t]);
+            }
         }
         
-        std::cout << "*** Using new distributed PayloadTwistFactor architecture ***" << std::endl;
-        std::cout << "*** Each robot owns its payload twist variables and factors ***" << std::endl;
+        if (force_variables.size() == n_robots) {
+            auto force_factor = std::make_shared<ForceAllocationFactor>(
+                next_fid_++, -1,  // -1表示系统级因子
+                force_variables,
+                globals.SIGMA_FACTOR_FORCE_ALLOCATION,  // 需要在Globals中定义
+                Eigen::VectorXd::Zero(3),  // 零测量
+                contact_points,
+                contact_normals
+            );
+            
+            // 将因子添加到第一个机器人的因子图中（或者创建专门的系统级因子图）
+            auto first_robot = robots_.begin()->second;
+            for (auto var : force_variables) {
+                var->add_factor(force_factor);
+            }
+            first_robot->factors_[force_factor->key_] = force_factor;
+            first_robot->force_allocation_factor_ = force_factor;
+            
+            std::cout << "Created ForceAllocationFactor for timestep " << t << std::endl;
+        }
+    }
+}
+
+void Simulator::updateForceAllocationSystem() {
+    if (payloads_.empty()) return;
+    
+    auto payload = payloads_.begin()->second;
+    
+    // 计算期望的payload wrench
+    Eigen::Vector3d desired_wrench = computeDesiredPayloadWrench(payload);
+    
+    // 更新所有force allocation factors的期望wrench
+    for (auto [rid, robot] : robots_) {
+        if (robot->force_allocation_factor_) {
+            robot->force_allocation_factor_->updateDesiredWrench(desired_wrench);
+        }
     }
     
-    // ========== 机器人删除流程 ==========
-    // 删除需要删除的机器人
-    std::cout << "Deleting " << robots_to_delete.size() << " robots..." << std::endl;
-    for (auto robot : robots_to_delete){
-        std::cout << "Deleting robot " << robot->rid_ << std::endl;
-        deleteRobot(robot);
+    static int debug_counter = 0;
+    if (debug_counter++ % 60 == 0) {
+        std::cout << "Desired wrench: [" << desired_wrench.transpose() << "]" << std::endl;
+    }
+}
+
+Eigen::Vector3d Simulator::computeDesiredPayloadWrench(std::shared_ptr<Payload> payload) {
+    // 类似现有的computeDesiredPayloadVelocity逻辑，但计算所需的力和力矩
+    
+    Eigen::Vector2d dist_to_target = payload->target_position_ - payload->position_;
+    Eigen::Vector2d desired_velocity = Eigen::Vector2d::Zero();
+    
+    if (dist_to_target.norm() > 0.1) {
+        desired_velocity = dist_to_target.normalized() * globals.MAX_SPEED * 0.5;
     }
     
-    // ========== 状态总结 ==========
-    std::cout << "Robot creation/deletion completed. Current system state:" << std::endl;
-    std::cout << "- Total robots: " << robots_.size() << std::endl;
-    std::cout << "- Total payloads: " << payloads_.size() << std::endl;
-    std::cout << "- Formation: " << globals.FORMATION << std::endl;
-    
-    if (globals.FORMATION == "Payload") {
-        std::cout << "- Rigid attachment: " << (globals.USE_RIGID_ATTACHMENT ? "enabled" : "disabled") << std::endl;
-        std::cout << "- Distributed control: " << (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL ? "enabled" : "disabled") << std::endl;
-        std::cout << "- Direct velocity control: " << (globals.USE_DIRECT_PAYLOAD_VELOCITY ? "enabled" : "disabled") << std::endl;
-        std::cout << "- Architecture: Each robot owns its payload variables and factors" << std::endl;
+    // 计算期望角速度
+    double rotation_error = payload->getRotationError();
+    double desired_angular_velocity = 0.0;
+    if (std::abs(rotation_error) > 0.01) {
+        desired_angular_velocity = std::copysign(1.0, rotation_error) * 
+            std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), std::abs(rotation_error));
     }
+    
+    // 转换为所需的力和力矩
+    Eigen::Vector2d current_velocity = payload->getVelocity();
+    double current_angular_velocity = payload->getAngularVelocity();
+    
+    double dt = globals.TIMESTEP;
+    double mass = payload->getMass();
+    double inertia = payload->getMomentOfInertia();
+    
+    Eigen::Vector2d required_force = (mass * (desired_velocity - current_velocity)) / dt;
+    double required_torque = (inertia * (desired_angular_velocity - current_angular_velocity)) / dt;
+    
+    return Eigen::Vector3d(required_force.x(), required_force.y(), required_torque);
 }
 
 /*******************************************************************************/

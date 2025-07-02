@@ -18,54 +18,233 @@ Payload::Payload(Simulator* sim,
     sim_(sim),
     payload_id_(payload_id),
     position_(initial_position),
-    target_position_(initial_position), // 默认目标是初始位置
+    target_position_(initial_position),
     width_(width),
     height_(height),
     color_(color),
     rotation_(0.0f),
-    physicsBody_(nullptr),
     task_completed_(false),
-    target_tolerance_(2.0f), // 默认容忍距离
+    target_tolerance_(2.0f),
     target_orientation_(Eigen::Quaterniond::Identity()),
     velocity_(Eigen::Vector2d::Zero()) {
-        physicsWorld_ = sim->getPhysicsWorld();
-        if (physicsWorld_){
-            createPhysicsBody(density);
-        }
+        mujoco_body_id_ = -1;
+        mujoco_model_ = nullptr;
+        mujoco_data_ = nullptr;
+        // MuJoCo body的创建将在Simulator中统一管理
+        // 这里不直接创建，而是等待Simulator分配ID
     }
 Payload::~Payload(){
-    if (physicsBody_){
-        physicsWorld_->DestroyBody(physicsBody_);
+    // MuJoCo body的销毁由Simulator统一管理
+    // 这里不需要手动清理
+}
+
+void Payload::setMuJoCoReferences(mjModel* model, mjData* data) {
+    mujoco_model_ = model;
+    mujoco_data_ = data;
+}
+
+void Payload::createMuJoCoBody(float density) {
+    // 这个方法现在只是占位，实际的body创建在Simulator中进行
+    if (mujoco_body_id_ < 0) {
+        std::cerr << "Warning: Payload " << payload_id_ << " MuJoCo body ID not set" << std::endl;
     }
 }
 
-void Payload::createPhysicsBody(float density){
-    // Initialize a payload physics body
-    b2BodyDef bodyDef;
-    bodyDef.type = b2_dynamicBody;
-    bodyDef.position.Set(position_(0), position_(1));
-    bodyDef.angle = rotation_;
-
-    // Create the body in the physics world
-    physicsBody_ = physicsWorld_->CreateBody(&bodyDef);
-
-    // Create a rectangle shape for the payload
-    b2PolygonShape boxShape;
-    boxShape.SetAsBox(width_ / 2.0f, height_ / 2.0f);
-
-    // Create a fixture definition for the rectangle shape
-    b2FixtureDef fixtureDef;
-    fixtureDef.shape = &boxShape;
-    fixtureDef.density = density;
-    fixtureDef.friction = globals.PAYLOAD_FRICTION;
-    fixtureDef.restitution = 0.1f;
+void Payload::syncFromMuJoCo() {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) return;
     
-    physicsBody_->CreateFixture(&fixtureDef);
+    int pos_adr = mujoco_model_->jnt_qposadr[mujoco_body_id_];
+    int vel_adr = mujoco_model_->jnt_dofadr[mujoco_body_id_];
     
-    // 设置阻尼
-    physicsBody_->SetLinearDamping(0.2f);   // 线性阻尼
-    physicsBody_->SetAngularDamping(0.3f);  // 角度阻
+    // 更新位置
+    position_.x() = mujoco_data_->qpos[pos_adr + 0];
+    position_.y() = mujoco_data_->qpos[pos_adr + 1];
+    
+    // 更新四元数朝向
+    current_orientation_.w() = mujoco_data_->qpos[pos_adr + 3];
+    current_orientation_.x() = mujoco_data_->qpos[pos_adr + 4];
+    current_orientation_.y() = mujoco_data_->qpos[pos_adr + 5];
+    current_orientation_.z() = mujoco_data_->qpos[pos_adr + 6];
+    
+    // 更新速度
+    velocity_.x() = mujoco_data_->qvel[vel_adr + 0];
+    velocity_.y() = mujoco_data_->qvel[vel_adr + 1];
+    current_angular_velocity_ = mujoco_data_->qvel[vel_adr + 5];  // 绕z轴角速度
+    
+    // 更新2D旋转角度
+    rotation_ = getRotationFromQuaternion(current_orientation_);
 }
+
+void Payload::syncToMuJoCo() {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) return;
+    
+    int pos_adr = mujoco_model_->jnt_qposadr[mujoco_body_id_];
+    int vel_adr = mujoco_model_->jnt_dofadr[mujoco_body_id_];
+    
+    // 同步位置和朝向
+    mujoco_data_->qpos[pos_adr + 0] = position_.x();
+    mujoco_data_->qpos[pos_adr + 1] = position_.y();
+    mujoco_data_->qpos[pos_adr + 2] = 0.5;              // payload高度
+    
+    // 同步四元数朝向
+    mujoco_data_->qpos[pos_adr + 3] = current_orientation_.w();
+    mujoco_data_->qpos[pos_adr + 4] = current_orientation_.x();
+    mujoco_data_->qpos[pos_adr + 5] = current_orientation_.y();
+    mujoco_data_->qpos[pos_adr + 6] = current_orientation_.z();
+    
+    // 同步速度
+    mujoco_data_->qvel[vel_adr + 0] = velocity_.x();
+    mujoco_data_->qvel[vel_adr + 1] = velocity_.y();
+    mujoco_data_->qvel[vel_adr + 2] = 0.0;              // vz
+    mujoco_data_->qvel[vel_adr + 3] = 0.0;              // wx
+    mujoco_data_->qvel[vel_adr + 4] = 0.0;              // wy
+    mujoco_data_->qvel[vel_adr + 5] = current_angular_velocity_;  // wz
+}
+
+Eigen::Vector2d Payload::getMuJoCoPosition() const {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) {
+        return position_;
+    }
+    
+    int pos_adr = mujoco_model_->jnt_qposadr[mujoco_body_id_];
+    return Eigen::Vector2d(mujoco_data_->qpos[pos_adr + 0], mujoco_data_->qpos[pos_adr + 1]);
+}
+
+Eigen::Vector2d Payload::getMuJoCoVelocity() const {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) {
+        return velocity_;
+    }
+    
+    int vel_adr = mujoco_model_->jnt_dofadr[mujoco_body_id_];
+    return Eigen::Vector2d(mujoco_data_->qvel[vel_adr + 0], mujoco_data_->qvel[vel_adr + 1]);
+}
+
+double Payload::getMuJoCoRotation() const {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) {
+        return rotation_;
+    }
+    
+    int pos_adr = mujoco_model_->jnt_qposadr[mujoco_body_id_];
+    Eigen::Quaterniond quat(
+        mujoco_data_->qpos[pos_adr + 3],  // w
+        mujoco_data_->qpos[pos_adr + 4],  // x
+        mujoco_data_->qpos[pos_adr + 5],  // y
+        mujoco_data_->qpos[pos_adr + 6]   // z
+    );
+    return getRotationFromQuaternion(quat);
+}
+
+double Payload::getMuJoCoAngularVelocity() const {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) {
+        return current_angular_velocity_;
+    }
+    
+    int vel_adr = mujoco_model_->jnt_dofadr[mujoco_body_id_];
+    return mujoco_data_->qvel[vel_adr + 5];  // wz分量
+}
+
+double Payload::getMuJoCoMass() const {
+    if (mujoco_body_id_ < 0 || !mujoco_model_) {
+        return width_ * height_ * globals.PAYLOAD_DENSITY;  // 估算
+    }
+    
+    return mujoco_model_->body_mass[mujoco_body_id_];
+}
+
+double Payload::getMuJoCoInertia() const {
+    if (mujoco_body_id_ < 0 || !mujoco_model_) {
+        // 矩形的转动惯量估算
+        double mass = width_ * height_ * globals.PAYLOAD_DENSITY;
+        return mass * (width_ * width_ + height_ * height_) / 12.0;
+    }
+    
+    // MuJoCo中的转动惯量（绕z轴）
+    return mujoco_model_->body_inertia[mujoco_body_id_ * 3 + 2];
+}
+
+// 7. 重写状态设置方法
+void Payload::setMuJoCoPosition(const Eigen::Vector2d& position) {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) {
+        position_ = position;
+        return;
+    }
+    
+    int pos_adr = mujoco_model_->jnt_qposadr[mujoco_body_id_];
+    mujoco_data_->qpos[pos_adr + 0] = position.x();
+    mujoco_data_->qpos[pos_adr + 1] = position.y();
+}
+
+void Payload::setMuJoCoVelocity(const Eigen::Vector2d& velocity) {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) {
+        velocity_ = velocity;
+        return;
+    }
+    
+    int vel_adr = mujoco_model_->jnt_dofadr[mujoco_body_id_];
+    mujoco_data_->qvel[vel_adr + 0] = velocity.x();
+    mujoco_data_->qvel[vel_adr + 1] = velocity.y();
+}
+
+void Payload::setMuJoCoRotation(double rotation) {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) {
+        rotation_ = rotation;
+        current_orientation_ = Eigen::Quaterniond(cos(rotation/2), 0, 0, sin(rotation/2));
+        return;
+    }
+    
+    int pos_adr = mujoco_model_->jnt_qposadr[mujoco_body_id_];
+    Eigen::Quaterniond quat(cos(rotation/2), 0, 0, sin(rotation/2));
+    
+    mujoco_data_->qpos[pos_adr + 3] = quat.w();
+    mujoco_data_->qpos[pos_adr + 4] = quat.x();
+    mujoco_data_->qpos[pos_adr + 5] = quat.y();
+    mujoco_data_->qpos[pos_adr + 6] = quat.z();
+}
+
+void Payload::setMuJoCoAngularVelocity(double angular_velocity) {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) {
+        current_angular_velocity_ = angular_velocity;
+        return;
+    }
+    
+    int vel_adr = mujoco_model_->jnt_dofadr[mujoco_body_id_];
+    mujoco_data_->qvel[vel_adr + 5] = angular_velocity;
+}
+
+// 8. 重写力控制方法
+void Payload::applyMuJoCoForce(const Eigen::Vector2d& force, const Eigen::Vector2d& point) {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) return;
+    
+    if (point.norm() < 1e-6) {
+        // 在质心施加力
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 0] = force.x();
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 1] = force.y();
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 2] = 0.0;
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 3] = 0.0;
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 4] = 0.0;
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 5] = 0.0;
+    } else {
+        // 在指定点施加力
+        Eigen::Vector2d center = getMuJoCoPosition();
+        Eigen::Vector2d r = point - center;
+        double torque = r.x() * force.y() - r.y() * force.x();
+        
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 0] = force.x();
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 1] = force.y();
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 2] = 0.0;
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 3] = 0.0;
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 4] = 0.0;
+        mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 5] = torque;
+    }
+}
+
+void Payload::applyMuJoCoTorque(double torque) {
+    if (mujoco_body_id_ < 0 || !mujoco_model_ || !mujoco_data_) return;
+    
+    mujoco_data_->xfrc_applied[mujoco_body_id_ * 6 + 5] = torque;
+}
+
+
 
 void Payload::setTargetFromRelativeRotation(double relative_rotation_rad) {
     // target_orientation = initial_orientation * relative_rotation
@@ -77,15 +256,8 @@ void Payload::setTargetFromRelativeRotation(double relative_rotation_rad) {
 }
 
 void Payload::update() {
-    if (physicsBody_) {
-        b2Vec2 physpos = physicsBody_->GetPosition();
-        position_.x() = physpos.x;
-        position_.y() = physpos.y;
-        rotation_ = physicsBody_->GetAngle();
-        
-        // 正确更新current_orientation_
-        current_orientation_ = Eigen::Quaterniond(cos(rotation_/2), 0, 0, sin(rotation_/2));
-    }
+    // 从MuJoCo同步状态
+    syncFromMuJoCo();
 }
 
 void Payload::setTarget(const Eigen::Vector2d& target) {
@@ -178,29 +350,20 @@ void Payload::draw() {
 }
 
 
-Eigen::Vector2d Payload::getPosition() const{
-    return position_;
+Eigen::Vector2d Payload::getPosition() const {
+    return getMuJoCoPosition();
 }
 
 float Payload::getMass() const {
-    if (physicsBody_) {
-        return physicsBody_->GetMass();
-    }
-    return 0.0f;
+    return static_cast<float>(getMuJoCoMass());
 }
 
 double Payload::getMomentOfInertia() const {
-    if (physicsBody_) {
-        return physicsBody_->GetInertia();
-    }
-    return 0.0;
+    return getMuJoCoInertia();
 }
 
 double Payload::getAngularVelocity() const {
-    if (physicsBody_) {
-        return physicsBody_->GetAngularVelocity();
-    }
-    return 0.0;
+    return getMuJoCoAngularVelocity();
 }
 
 Eigen::Quaterniond Payload::getRotation() const{
@@ -222,18 +385,12 @@ double Payload::getRotationError() const {
 }
 
 Eigen::Vector2d Payload::getVelocity() const {
-    if(physicsBody_) {
-        b2Vec2 vel = physicsBody_->GetLinearVelocity();
-        return Eigen::Vector2d(vel.x, vel.y);
-    }
-    return Eigen::Vector2d::Zero();
+    return getMuJoCoVelocity();
 }
 
 std::pair<std::vector<Eigen::Vector2d>, std::vector<Eigen::Vector2d>> Payload::getContactPointsAndNormals() const {
     std::vector<Eigen::Vector2d> points;
     std::vector<Eigen::Vector2d> normals;
-    
-    if (!physicsBody_) return {points, normals};
     
     // 直接使用rotation_而不是从四元数计算
     Eigen::Vector2d center = position_;

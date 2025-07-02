@@ -7,21 +7,30 @@
 #include <map>
 #include <memory>
 #include <algorithm>
+#include <random>
 
+// Core includes
 #include <Utils.h>
 #include <gbp/GBPCore.h>
-#include <Graphics.h>
 #include <gbp/Variable.h>
-#include <nanoflann.h>
 
+// Graphics and UI
+#include <Graphics.h>
 #include <raylib.h>
 #include <rlights.h>
+
+// Physics engines
+#include <mujoco/mujoco.h>
+#include <GLFW/glfw3.h>
+
+// Spatial data structures
 #include <nanoflann.h>
 #include <KDTreeMapOfVectorsAdaptor.h>
-#include <random>
-#include "box2d/box2d.h"
+
+// Project classes
 #include "Payload.h"
 
+// Forward declarations
 class Robot;
 class Graphics;
 class TreeOfRobots;
@@ -36,125 +45,204 @@ public:
     friend class Factor;
     friend class Payload;
 
-    // Constructor
+    //==========================================================================
+    // CONSTRUCTOR & DESTRUCTOR
+    //==========================================================================
     Simulator();
     ~Simulator();
 
-    // Pointer to Graphics class which hold all the camera, graphics and models for display
-    Graphics* graphics;
+    //==========================================================================
+    // CORE SIMULATION DATA
+    //==========================================================================
+    uint32_t clock_ = 0;                            // Simulation clock (timesteps)
+    bool new_robots_needed_ = true;                 // Whether to create new robots dynamically
+    bool symmetric_factors = false;                 // Create redundant factor pairs between robots
 
-    // kd-tree to store the positions of the robots at each timestep.
-    // This is used for calculating the neighbours of robots blazingly fast.
+    // ID generators
+    int next_rid_ = 0;                              // Next robot ID
+    int next_vid_ = 0;                              // Next variable ID  
+    int next_fid_ = 0;                              // Next factor ID
+    int next_payload_id_ = 0;                       // Next payload ID
+
+    // Entity containers
+    std::map<int, std::shared_ptr<Robot>> robots_;  // All robots indexed by rid
+    std::map<int, std::shared_ptr<Payload>> payloads_; // All payloads indexed by pid
+
+    //==========================================================================
+    // GRAPHICS & VISUALIZATION
+    //==========================================================================
+    Graphics* graphics;                             // Main graphics system
+    Image obstacleImg;                              // Obstacle environment image
+
+    //==========================================================================
+    // SPATIAL INDEXING (KD-TREE)
+    //==========================================================================
     typedef KDTreeMapOfVectorsAdaptor<std::map<int,std::vector<double>>> KDTree;
     std::map<int, std::vector<double>> robot_positions_{{0,{0.,0.}}};
-    KDTree* treeOfRobots_;
+    KDTree* treeOfRobots_;                         // Fast neighbor lookup
 
-    // Image representing the obstacles in the environment
-    Image obstacleImg;
+    //==========================================================================
+    // PHYSICS ENGINES
+    //==========================================================================
+    // MuJoCo Physics & Rendering
+    mjModel* mujoco_model_ = nullptr;
+    mjData* mujoco_data_ = nullptr;
 
-    int next_rid_ = 0;                              // New robots will use this rid. It should be ++ incremented when this happens
-    int next_vid_ = 0;                              // New variables will use this vid. It should be ++ incremented when this happens
-    int next_fid_ = 0;                              // New factors will use this fid. It should be ++ incremented when this happens
-    int next_payload_id_ = 0;
-    uint32_t clock_ = 0;                            // Simulation clock (timesteps)                   
-    std::map<int, std::shared_ptr<Robot>> robots_;  // Map containing smart pointers to all robots, accessed by their rid.
-    std::map<int, std::shared_ptr<Payload>> payloads_; // Map containing smart pointers to all payloads, accessed by their pid.
+    mjvCamera mujoco_cam_;
+    mjvOption mujoco_opt_;
+    mjvScene mujoco_scn_;
+    mjrContext mujoco_con_;
+    GLFWwindow* mujoco_window_ = nullptr;
 
-    bool new_robots_needed_ = true;                 // Whether or not to create new robots. (Some formations are dynamicaly changing)
-    bool symmetric_factors = false;                 // If true, when inter-robot factors need to be created between two robots,
-                                                    // a pair of factors is created (one belonging to each robot). This becomes a redundancy.
-    std::pair<Eigen::Vector2d, Eigen::Vector2d> getContactPoint(int robot_id, int payload_id);
-    bool isRobotContactingPayload(int robot_id, int payload_id);
-    b2World* physicsWorld_ = nullptr;
-    void computeLeastSquares();
-    void applyForcesToPayload(std::shared_ptr<Payload> payload, 
+    std::map<int, int> robot_to_mujoco_id_;     // robot_id -> mujoco_body_id
+    std::map<int, int> payload_to_mujoco_id_;   // payload_id -> mujoco_body_id
+    std::map<int, int> mujoco_to_robot_id_;     // mujoco_body_id -> robot_id  
+    std::map<int, int> mujoco_to_payload_id_;   // mujoco_body_id -> payload_id
+
+    bool initializeMuJoCo();                   // 初始化MuJoCo世界
+    void destroyMuJoCo();                      // 销毁MuJoCo世界
+    bool loadMuJoCoModel(const std::string& xml_content);
+    std::string generateMuJoCoXML();           // 动态生成XML模型
+
+    // MuJoCo仿真控制
+    void stepMuJoCo();                         // MuJoCo物理步进
+    void resetMuJoCo();                        // 重置MuJoCo仿真
+
+    // MuJoCo可视化
+    bool initializeMuJoCoVisualization();
+    void renderMuJoCo();
+    void updateMuJoCoCamera();
+
+    // 机器人创建（需要重新编译MuJoCo模型）
+    int addRobotToModel(const Eigen::Vector2d& position, double radius, const std::string& name);
+    int addPayloadToModel(const Eigen::Vector2d& position, double width, double height, const std::string& name);
+    
+    // 模型重建
+    bool rebuildMuJoCoModel();                 // 当添加新实体时重建模型
+    void updateEntityReferences();            // 更新实体的MuJoCo引用
+    
+    // 替换Box2D的碰撞检测
+    bool areInContactMuJoCo(int body1_id, int body2_id) const;
+    
+    // 更新现有方法签名（保持接口，改为内部调用MuJoCo）
+    bool isRobotContactingPayload(int robot_id, int payload_id);  // 内部调用areInContactMuJoCo
+    std::pair<Eigen::Vector2d, Eigen::Vector2d> getContactPoint(int robot_id, int payload_id); // 内部调用getContactInfoMuJoCo
+    std::pair<Eigen::Vector2d, Eigen::Vector2d> getContactInfoMuJoCo(int body1_id, int body2_id) const;
+
+    void applyForcesToPayloadMuJoCo(std::shared_ptr<Payload> payload, 
                                    const Eigen::VectorXd& forces,
                                    const std::vector<Eigen::Vector2d>& contact_points,
                                    const std::vector<Eigen::Vector2d>& contact_normals);
 
 
-    b2World* getPhysicsWorld(){
-        if (physicsWorld_ == nullptr){
-            b2Vec2 gravity(0.0f, 0.0f); // No gravity
-            physicsWorld_ = new b2World(gravity);
-        }
-        return physicsWorld_;
-    }
-    /*******************************************************************************/
-    // Create new robots if needed. Handles deletion of robots out of bounds. 
-    // New formations must modify the vectors "robots to create" and optionally "robots_to_delete"
-    // by appending (push_back()) a shared pointer to a Robot class.
-    /*******************************************************************************/    
-    
-    void assignContactPoints();
-    void updateDistributedPayloadControl();
-    // 辅助方法
-    std::vector<int> getNearbyRobots(int payload_id, double radius);
-    void reassignLostContacts(int payload_id);
-    
-    void createSingleRobot();
+
+    //==========================================================================
+    // ROBOT & PAYLOAD MANAGEMENT
+    //==========================================================================
     void createOrDeleteRobots();
-    void isRobotContactngPayload(int robot_id, int payload_id);
+    void deleteRobot(std::shared_ptr<Robot> robot);
+    
     void createPayload(Eigen::Vector2d position, float width, float height);
     void deletePayload(int payload_id);
+    std::shared_ptr<Payload> getPayload(int payload_id);
+
+    //==========================================================================
+    // CONTACT & COLLISION DETECTION
+    //==========================================================================
+    
     std::vector<Eigen::Vector2d> getFixedContactPoints(std::shared_ptr<Payload> payload);
     std::vector<Eigen::Vector2d> getFixedContactNormals(std::shared_ptr<Payload> payload);
-    Eigen::VectorXd solveConstrainedLeastSquares(const Eigen::MatrixXd &G, const Eigen::Vector3d& w_cmd);
-    std::shared_ptr<Payload> getPayload(int payload_id);
+    
+    void assignContactPoints();
+    std::vector<int> getNearbyRobots(int payload_id, double radius);
+    void reassignLostContacts(int payload_id);
+
+    //==========================================================================
+    // PAYLOAD CONTROL & FORCE ALLOCATION
+    //==========================================================================
+    // Force allocation methods
+    void computeLeastSquares();
+    Eigen::VectorXd solveConstrainedLeastSquares(const Eigen::MatrixXd& G, const Eigen::Vector3d& w_cmd);
+    void applyForcesToPayload(std::shared_ptr<Payload> payload, 
+                             const Eigen::VectorXd& forces,
+                             const std::vector<Eigen::Vector2d>& contact_points,
+                             const std::vector<Eigen::Vector2d>& contact_normals);
+    
+    // Factor-based control
+    void createForceAllocationFactors();
+    void updateForceAllocationSystem();
+    void updateDistributedPayloadControl();
+    
+    // Direct velocity control
     void applyDirectPayloadVelocityControl();
     Eigen::Vector2d computeDesiredPayloadVelocity(std::shared_ptr<Payload> payload);
     double computeDesiredPayloadAngularVelocity(std::shared_ptr<Payload> payload);
+    
+    // Wrench computation
+    Eigen::Vector3d computeDesiredPayloadWrench(std::shared_ptr<Payload> payload);
 
-    /*******************************************************************************/
-    // Set a proportion of robots to not perform inter-robot communications
-    /*******************************************************************************/
-    void setCommsFailure(float failure_rate=globals.COMMS_FAILURE_RATE);
+    //==========================================================================
+    // SIMULATION STEPPING & CONTROL
+    //==========================================================================
+    void timestep();                                // Main simulation step
+    void moveRobot();                               // Legacy robot movement
 
-    /*******************************************************************************/
-    // Timestep loop of simulator.
-    /*******************************************************************************/
-    void timestep();
-
-    void moveRobot();
-
-    /*******************************************************************************/
-    // Drawing graphics.
-    /*******************************************************************************/
-    void draw();
-
-    void draw_payloads();
-
-    /*******************************************************************************/
-    // Use a kd-tree to perform a radius search for neighbours of a robot within comms. range
-    // (Updates the neighbours_ of a robot)
-    /*******************************************************************************/    
+    //==========================================================================
+    // COMMUNICATION & NETWORKING
+    //==========================================================================
     void calculateRobotNeighbours(std::map<int,std::shared_ptr<Robot>>& robots);
+    void setCommsFailure(float failure_rate = globals.COMMS_FAILURE_RATE);
 
-    /*******************************************************************************/
-    // Handles keypresses and mouse input, and updates camera.
-    /*******************************************************************************/
-    void eventHandler();
+    //==========================================================================
+    // GRAPHICS & RENDERING
+    //==========================================================================
+    void draw();                                    // Main rendering
+    void draw_payloads();                          // Payload-specific rendering
+    void eventHandler();                           // Input handling
 
-    /*******************************************************************************/
-    // Deletes the robot from the simulator's robots_, as well as any variable/factors associated.
-    /*******************************************************************************/
-    void deleteRobot(std::shared_ptr<Robot> robot);
-
-    /***************************************************************************************************************/
-    // RANDOM NUMBER GENERATOR.
-    // Usage: random_number("normal", mean, sigma) or random_number("uniform", lower, upper)
-    /***************************************************************************************************************/
+    //==========================================================================
+    // RANDOM NUMBER GENERATION
+    //==========================================================================
+private:
     std::mt19937 gen_normal = std::mt19937(globals.SEED);
     std::mt19937 gen_uniform = std::mt19937(globals.SEED);
     std::mt19937 gen_uniform_int = std::mt19937(globals.SEED);
+
+    std::string xml_header_;
+    std::string xml_robots_;
+    std::string xml_payloads_;
+    std::string xml_footer_;
+
+    int next_mujoco_body_id_ = 0;
+    bool model_needs_rebuild_ = false;
+
+    // XML生成辅助
+    std::string generateRobotXML(int robot_id, const Eigen::Vector2d& pos, double radius);
+    std::string generatePayloadXML(int payload_id, const Eigen::Vector2d& pos, double width, double height);
+    
+    // ID管理
+    int allocateMuJoCoBodyId();
+    void deallocateMuJoCoBodyId(int body_id);
+    
+    // 错误处理
+    void handleMuJoCoError(const std::string& operation);
+
+public:
     template<typename T>
-    T random_number(std::string distribution, T param1, T param2){
-        if (distribution=="normal") return std::normal_distribution<T>(param1, param2)(gen_normal);
-        if (distribution=="uniform") return std::uniform_real_distribution<T>(param1, param2)(gen_uniform);
-        return (T)0;
+    T random_number(std::string distribution, T param1, T param2) {
+        if (distribution == "normal") 
+            return std::normal_distribution<T>(param1, param2)(gen_normal);
+        if (distribution == "uniform") 
+            return std::uniform_real_distribution<T>(param1, param2)(gen_uniform);
+        return static_cast<T>(0);
     }
-    int random_int(int lower, int upper){
+    
+    int random_int(int lower, int upper) {
         return std::uniform_int_distribution<int>(lower, upper)(gen_uniform_int);
     }
 
+    //==========================================================================
+    // DEPRECATED/LEGACY METHODS
+    //==========================================================================
+    void isRobotContactngPayload(int robot_id, int payload_id);  // Typo in original - keep for compatibility
 };

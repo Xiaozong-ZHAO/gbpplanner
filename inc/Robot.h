@@ -3,137 +3,211 @@
 // This code is licensed (see LICENSE for details)
 /**************************************************************************************/
 #pragma once
-#include "Simulator.h"
+
 #include <memory>
 #include <vector>
 #include <deque>
-#include <raylib.h>
-#include <Eigen/Dense>
+
+// Core includes
 #include <Utils.h>
 #include <gbp/GBPCore.h>
 #include <gbp/Factor.h>
 #include <gbp/Factorgraph.h>
-#include "box2d/box2d.h"
 
-// extern Globals globals;
+// Math library
+#include <Eigen/Dense>
+
+// Graphics
+#include <raylib.h>
+
+// Physics engines
+#include <mujoco/mujoco.h>
+
+
+// Forward declarations
+class Simulator;
+class Payload;
 
 /***************************************************************************/
-// Creates a robot. Inputs required are :
-//      - Pointer to the simulator
-//      - A robot id rid (should be taken from simulator->next_rid_++),
-//      - A dequeue of waypoints (which are 4 dimensional [x,y,xdot,ydot])
-//      - Robot radius
-//      - Colour
+// Robot Class - Multi-robot collaborative manipulation with factor graphs
+//
+// Creates a robot with the following inputs:
+//   - Pointer to the simulator
+//   - Robot ID (should be taken from simulator->next_rid_++)
+//   - Deque of waypoints (4-dimensional [x,y,xdot,ydot])
+//   - Robot radius
+//   - Color
+//
 // This is a derived class from the FactorGraph class
 /***************************************************************************/
 class Robot : public FactorGraph {
 public:
-    // Constructor
-    Robot(Simulator* sim,
-          int rid,
-          std::deque<Eigen::VectorXd> waypoints,
-          float size,
-          Color color,
-          b2World* world = nullptr);
+    //==========================================================================
+    // CONSTRUCTOR & DESTRUCTOR
+    //==========================================================================
+    Robot(Simulator* sim, 
+            int rid, 
+            std::deque<Eigen::VectorXd> waypoints, 
+            float size, Color color);
     ~Robot();
 
-
+    //==========================================================================
+    // CORE ROBOT PROPERTIES
+    //==========================================================================
     Simulator* sim_;                            // Pointer to the simulator
-    std::vector<std::shared_ptr<Variable>> payload_twist_variables_;     // 多个payload变量
-    std::vector<std::shared_ptr<PayloadTwistFactor>> payload_twist_factors_; // 对应的因子
-    int rid_ = 0;                               // Robot id
-    std::deque<Eigen::VectorXd> waypoints_{};   // Dequeue of waypoints (whenever the robot reaches a point, it is popped off the front of the dequeue)
-    float robot_radius_ = 1.;                   // Robot radius
-    Color color_ = DARKGREEN;                   // Colour of robot
+    int rid_ = 0;                               // Robot unique identifier
+    std::deque<Eigen::VectorXd> waypoints_{};   // Waypoint queue [x,y,xdot,ydot]
+    float robot_radius_ = 1.0f;                 // Robot physical radius
+    Color color_ = DARKGREEN;                   // Robot visualization color
+    Eigen::VectorXd position_;                  // Current position [x,y]
+    float height_3D_ = 0.0f;                    // Height for 3D visualization
+    int mujoco_body_id_;                        // MuJoCo body ID
+    int mujoco_joint_id_;                       // MuJoCo joint ID (用于载荷连接)
+    mjModel* mujoco_model_;                     // MuJoCo模型指针（从Simulator获取）
+    mjData* mujoco_data_;                       // MuJoCo数据指针（从Simulator获取）
 
-    int num_variables_;                         // Number of variables in the planned path (assumed to be the same for all robots)
-    std::vector<int> connected_r_ids_{};        // List of robot ids that are currently connected via inter-robot factors to this robot
-    std::vector<int> neighbours_{};             // List of robot ids that are within comms radius of this robot
-    Image* p_obstacleImage;                     // Pointer to image representing the obstacles in the environment
-    float height_3D_ = 0.f;                     // Height out of plane (for 3d visualisation only)
-    Eigen::VectorXd position_;                  // Position of the robot (equivalent to taking the [x,y] of the current state of the robot)
+    //==========================================================================
+    // FACTOR GRAPH STRUCTURE
+    //==========================================================================
+    int num_variables_;                         // Number of variables in planned path
     
-    std::vector<int> connected_payload_ids_;       // 类似connected_r_ids_
-    int assigned_contact_point_index_;             // 分配的接触点索引（而不是坐标）
-    b2Body* physicsBody_;
-    b2World* physicsWorld_;
-    bool usePhysics_;
-    b2WeldJoint* payload_joint_;  // 新增：与payload的焊接关节
-    Eigen::Vector2d cached_r_vector_;                   // 缓存的力臂向量
-    Eigen::Vector2d cached_contact_normal_;             // 缓存的接触法向量
-    bool payload_geometry_cached_;                      // 几何参数是否已缓存
+    // Inter-robot communication and factors
+    std::vector<int> connected_r_ids_{};        // Connected robot IDs via factors
+    std::vector<int> neighbours_{};             // Robot IDs within communication range
+    
+    // Payload-related factor graph components
+    std::vector<std::shared_ptr<Variable>> payload_twist_variables_;     // Payload twist variables
+    std::vector<std::shared_ptr<PayloadTwistFactor>> payload_twist_factors_; // Corresponding factors
+    std::vector<int> connected_payload_ids_;    // Connected payload IDs
 
-    // 简化后的payload相关方法
-    // void createPayloadFactors(std::shared_ptr<Payload> payload);
-    // void deletePayloadFactors(std::shared_ptr<Payload> payload);
-    // 修正：payload相关方法
-    void updatePayloadTwistPriors();                    // 注意：复数形式
-    std::vector<Eigen::Vector3d> computeDesiredPayloadTwists();  // 返回多个twist
-    void updatePayloadFactorGeometry();                 // 更新因子的几何参数
-    void cachePayloadGeometry();                        // 缓存payload几何参数
+    //==========================================================================
+    // PHYSICS INTEGRATION
+    //==========================================================================
+    
+    void syncToMuJoCo();                        // 同步逻辑状态到MuJoCo
+    void syncFromMuJoCo();                      // 从MuJoCo同步状态
+    void setMuJoCoReferences(mjModel* model, mjData* data); // 设置MuJoCo引用
+    void createMuJoCoBody();                    // 创建MuJoCo body
+    Eigen::Vector2d getMuJoCoPosition() const;
+    Eigen::Vector2d getMuJoCoVelocity() const;
+    double getMuJoCoRotation() const;
+    double getMuJoCoAngularVelocity() const;
+    double getMuJoCoMass() const;
+    // 状态设置
+    void setMuJoCoPosition(const Eigen::Vector2d& position);
+    void setMuJoCoVelocity(const Eigen::Vector2d& velocity);
+    void setMuJoCoRotation(double rotation);
+    void setMuJoCoAngularVelocity(double angular_velocity);
+    // 力控制
+    void applyMuJoCoForce(const Eigen::Vector2d& force, const Eigen::Vector2d& point = Eigen::Vector2d::Zero());
+    void applyMuJoCoTorque(double torque);
+
+    //==========================================================================
+    // PAYLOAD ATTACHMENT - MuJoCo约束
+    //==========================================================================
+    void attachToPayloadMuJoCo(std::shared_ptr<Payload> payload, const Eigen::Vector2d& attach_point);
+    void detachFromPayloadMuJoCo();
+    bool isAttachedToPayload() const { return mujoco_joint_id_ >= 0; }
+
+    //==========================================================================
+    // CONTACT & FORCE MANAGEMENT
+    //==========================================================================
+    // Contact point assignment
+    int assigned_contact_point_index_;         // Assigned contact point index
+    
+    // Cached geometry parameters
+    Eigen::Vector2d cached_r_vector_;          // Cached moment arm vector
+    Eigen::Vector2d cached_contact_normal_;    // Cached contact normal vector
+    bool payload_geometry_cached_;             // Whether geometry is cached
+    
+    // Force allocation
+    std::vector<std::shared_ptr<Variable>> contact_force_variables_;  // Contact force variables
+    std::shared_ptr<ForceAllocationFactor> force_allocation_factor_;  // Force allocation factor
+    double assigned_contact_force_;            // Currently assigned contact force
+
+    //==========================================================================
+    // PAYLOAD INTERACTION METHODS
+    //==========================================================================
+    // Force-based methods
+    void createContactForceVariables();
+    void createForceAllocationFactor();
+    void updateContactForceGeometry();
+    double getAssignedContactForce() const { return assigned_contact_force_; }
+    
+    // Twist-based methods
+    void updatePayloadTwistPriors();
+    std::vector<Eigen::Vector3d> computeDesiredPayloadTwists();
     Eigen::Vector3d interpolatePayloadTwist(int var_index, 
                                            const Eigen::Vector3d& current_twist,
                                            const Eigen::Vector3d& target_twist);
     
-    // 查询方法
+    // Geometry management
+    void updatePayloadFactorGeometry();
+    void cachePayloadGeometry();
+    
+    // Physical attachment
+    void attachToPayload(std::shared_ptr<Payload> payload, const Eigen::Vector2d& attach_point);
+    void detachFromPayload();
+    
+    // Query methods
     bool isConnectedToPayload(int payload_id) const;
     int getAssignedContactPointIndex() const { return assigned_contact_point_index_; }
 
-    void attachToPayload(std::shared_ptr<Payload> payload, const Eigen::Vector2d& attach_point);
-    void detachFromPayload();
-    bool isAttachedToPayload() const { return payload_joint_ != nullptr; }
-    /****************************************/
-    //Functions
-    /****************************************/
-    // 新增：绘制速度向量的方法
-    void drawVelocityVector();
+    //==========================================================================
+    // FACTOR MANAGEMENT
+    //==========================================================================
     void deletePayloadTwistFactors(int payload_id);
-
     
-    // 辅助方法
-    Eigen::Vector2d getCurrentVelocity() const;
-    Eigen::Vector2d getDesiredVelocity() const;
-    void updateForPayload();
-    void syncPhysicsToLogical();
-    void syncLogicalToPhysics();
-    void createPhysicsBody();
-    /* Change the prior of the Current state */
-    void updateCurrent();
-
-    /* Change the prior of the Horizon state */    
-    void updateHorizon();
-
-    /***************************************************************************************************/
-    // For new neighbours of a robot, create inter-robot factors if they don't exist. 
-    // Delete existing inter-robot factors for faraway robots
-    /***************************************************************************************************/    
+    // Inter-robot factors
     void updateInterrobotFactors();
     void createInterrobotFactors(std::shared_ptr<Robot> other_robot);
-    void deleteInterrobotFactors(std::shared_ptr<Robot> other_robot);  
+    void deleteInterrobotFactors(std::shared_ptr<Robot> other_robot);
 
+    //==========================================================================
+    // MOTION CONTROL & PHYSICS SYNC
+    //==========================================================================
+    // State updates
+    void updateCurrent();                       // Update current state prior
+    void updateHorizon();                      // Update horizon state prior
+    
+    void syncPhysicsToLogical();
+    void syncLogicalToPhysics();
+    void updateForPayload();
+    
+    // Velocity queries
+    Eigen::Vector2d getCurrentVelocity() const;
+    Eigen::Vector2d getDesiredVelocity() const;
 
-    /***************************************************************************************************/    
-    // Drawing function
-    /***************************************************************************************************/    
-    void draw();
+    //==========================================================================
+    // VISUALIZATION & DEBUGGING
+    //==========================================================================
+    Image* p_obstacleImage;                     // Obstacle environment image
+    
+    void draw();                                // Main drawing function
+    void drawVelocityVector();                  // Draw velocity vectors for debugging
 
-    /*******************************************************************************************/
-    // Function for determining the timesteps at which variables in the planned path are placed.
-    /*******************************************************************************************/   
+    //==========================================================================
+    // UTILITY METHODS
+    //==========================================================================
+    // Variable timestep calculation
     std::vector<int> getVariableTimesteps(int H, int M);
-
-
-    /*******************************************************************************************/   
-    // Access operator to get a pointer to a variable from the robot.
-    /*******************************************************************************************/   
-    std::shared_ptr<Variable>& operator[] (const int& v_id){
+    
+    // Variable access operator
+    std::shared_ptr<Variable>& operator[](const int& v_id) {
         int n = variables_.size();
         int search_vid = ((n + v_id) % n + n) % n;
         auto it = variables_.begin();
         std::advance(it, search_vid);
         return it->second;
-    }    
+    }
 
-
+    //==========================================================================
+    // HELPER METHODS (INLINE ACCESSORS)
+    //==========================================================================
+    std::shared_ptr<Variable> getVar(int index) const {
+        if (index < 0 || index >= variables_.size()) return nullptr;
+        auto it = variables_.begin();
+        std::advance(it, index);
+        return it->second;
+    }
 };
-

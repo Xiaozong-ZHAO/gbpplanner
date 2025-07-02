@@ -65,6 +65,71 @@ void Globals::parse_global_args(std::ifstream& config_file){
     USE_DIRECT_PAYLOAD_VELOCITY = static_cast<bool>((int)j["USE_DIRECT_PAYLOAD_VELOCITY"]);  // 新增
     DRAW_ROBOT_VELOCITIES = static_cast<bool>((int)j["DRAW_ROBOT_VELOCITIES"]);
     SIGMA_FACTOR_PAYLOAD_TWIST = j["SIGMA_FACTOR_PAYLOAD_TWIST"];
+    SIGMA_FACTOR_FORCE_ALLOCATION = j.value("SIGMA_FACTOR_FORCE_ALLOCATION", 1.0f);
+    USE_FORCE_ALLOCATION = static_cast<bool>((int)j.value("USE_FORCE_ALLOCATION", 1));
+
+    USE_MUJOCO_PHYSICS = static_cast<bool>((int)j.value("USE_MUJOCO_PHYSICS", 0));
+    MUJOCO_MODEL_FILE = j.value("MUJOCO_MODEL_FILE", "");
+    MUJOCO_TIMESTEP = j.value("MUJOCO_TIMESTEP", 0.001f);
+    MUJOCO_SOLVER_ITERATIONS = j.value("MUJOCO_SOLVER_ITERATIONS", 50);
+    MUJOCO_CONTACT_DAMPING = j.value("MUJOCO_CONTACT_DAMPING", 100.0f);
+    MUJOCO_ENABLE_VISUALIZATION = static_cast<bool>((int)j.value("MUJOCO_ENABLE_VISUALIZATION", 1));
+    MUJOCO_VISUALIZATION_WIDTH = j.value("MUJOCO_VISUALIZATION_WIDTH", 800);
+    MUJOCO_VISUALIZATION_HEIGHT = j.value("MUJOCO_VISUALIZATION_HEIGHT", 600);
+    
+    // 重力设置
+    if (j.contains("MUJOCO_GRAVITY") && j["MUJOCO_GRAVITY"].is_array()) {
+        MUJOCO_GRAVITY.clear();
+        for (auto& gravity_component : j["MUJOCO_GRAVITY"]) {
+            MUJOCO_GRAVITY.push_back(gravity_component);
+        }
+    } else {
+        MUJOCO_GRAVITY = {0.0f, 0.0f, 0.0f};  // 默认零重力
+    }
+    
+    // 高级MuJoCo设置
+    MUJOCO_INTEGRATOR = j.value("MUJOCO_INTEGRATOR", "RK4");
+    MUJOCO_CONE = j.value("MUJOCO_CONE", "pyramidal");
+    MUJOCO_JACOBIAN = j.value("MUJOCO_JACOBIAN", "sparse");
+    MUJOCO_SOLVER = j.value("MUJOCO_SOLVER", "PGS");
+    MUJOCO_ITERATIONS = j.value("MUJOCO_ITERATIONS", 100);
+    MUJOCO_TOLERANCE = j.value("MUJOCO_TOLERANCE", 1e-8f);
+    MUJOCO_LS_ITERATIONS = j.value("MUJOCO_LS_ITERATIONS", 50);
+    MUJOCO_LS_TOLERANCE = j.value("MUJOCO_LS_TOLERANCE", 0.01f);
+    
+    // 接触模型参数
+    MUJOCO_CONTACT_MARGIN = j.value("MUJOCO_CONTACT_MARGIN", 0.001f);
+    MUJOCO_CONTACT_GAP = j.value("MUJOCO_CONTACT_GAP", 0.0f);
+    MUJOCO_CONTACT_FRICTION_LOSS = j.value("MUJOCO_CONTACT_FRICTION_LOSS", 0.01f);
+    
+    // 解析SOLREF参数 [timeconst, dampratio]
+    if (j.contains("MUJOCO_CONTACT_SOLREF") && j["MUJOCO_CONTACT_SOLREF"].is_array()) {
+        MUJOCO_CONTACT_SOLREF.clear();
+        for (auto& param : j["MUJOCO_CONTACT_SOLREF"]) {
+            MUJOCO_CONTACT_SOLREF.push_back(param);
+        }
+    } else {
+        MUJOCO_CONTACT_SOLREF = {0.02f, 1.0f};  // 默认值
+    }
+    
+    // 解析SOLIMP参数 [dmin, dmax, width, midpoint, power]
+    if (j.contains("MUJOCO_CONTACT_SOLIMP") && j["MUJOCO_CONTACT_SOLIMP"].is_array()) {
+        MUJOCO_CONTACT_SOLIMP.clear();
+        for (auto& param : j["MUJOCO_CONTACT_SOLIMP"]) {
+            MUJOCO_CONTACT_SOLIMP.push_back(param);
+        }
+    } else {
+        MUJOCO_CONTACT_SOLIMP = {0.9f, 0.95f, 0.001f, 0.5f, 2.0f};  // 默认值
+    }
+    
+    // 调试设置
+    ENABLE_PHYSICS_LOGGING = static_cast<bool>((int)j.value("ENABLE_PHYSICS_LOGGING", 0));
+    LOG_CONTACT_FORCES = static_cast<bool>((int)j.value("LOG_CONTACT_FORCES", 0));
+    LOG_JOINT_CONSTRAINTS = static_cast<bool>((int)j.value("LOG_JOINT_CONSTRAINTS", 0));
+    PHYSICS_DEBUG_VISUALIZATION = static_cast<bool>((int)j.value("PHYSICS_DEBUG_VISUALIZATION", 0));
+    // STIFFNESS = j.value("MUJOCO_CONTACT_STIFFNESS", 10000.0f);
+    // MUJOCO_CONTACT_
+
 }
 
 Globals::Globals(){};

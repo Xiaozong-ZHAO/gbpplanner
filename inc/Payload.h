@@ -1,77 +1,180 @@
+/**************************************************************************************/
+// Copyright (c) 2023 Aalok Patwardhan (a.patwardhan21@imperial.ac.uk)
+// This code is licensed (see LICENSE for details)
+/**************************************************************************************/
 #ifndef PAYLOAD_H
 #define PAYLOAD_H
 
-#include "box2d/box2d.h"
-#include <Eigen/Dense>
+// Core includes
 #include <memory>
+
+// Math library
+#include <Eigen/Dense>
+
+// Graphics
 #include <raylib.h>
 
+// Physics engines
+#include <mujoco/mujoco.h>
+
+
+// Forward declarations
 class Simulator;
 
+/*****************************************************************************************/
+// PAYLOAD CLASS - Represents objects being manipulated by multiple robots
+//
+// The Payload class manages:
+// - Physical properties (mass, inertia, dimensions)
+// - Spatial state (position, orientation, velocity)
+// - Target tracking (desired position and orientation)
+// - Contact interface for robot interaction
+// - Physics integration (Box2D and optional MuJoCo)
+/*****************************************************************************************/
 class Payload {
-    public:
-        Payload(Simulator* sim,
-                int payload_id,
-                Eigen::Vector2d initial_position,
-                float width,
-                float height,
-                float density,
-                Color color = GRAY);
-        ~Payload();
+public:
+    //==========================================================================
+    // CONSTRUCTOR & DESTRUCTOR
+    //==========================================================================
+    Payload(Simulator* sim,
+            int payload_id,
+            Eigen::Vector2d initial_position,
+            float width,
+            float height,
+            float density,
+            Color color = GRAY);
+    ~Payload();
 
-    // Fundamental properties
-    int payload_id_;
-    Eigen::Vector2d position_;
-    Eigen::Vector2d target_position_;
-    Eigen::Quaterniond initial_orientation_ = Eigen::Quaterniond::Identity();
-    Eigen::Quaterniond current_orientation_ = Eigen::Quaterniond::Identity();
-    Eigen::Quaterniond target_orientation_ = Eigen::Quaterniond::Identity();
-    double mass_;
-    double moment_of_inertia_;
-    double current_angular_velocity_;
-    float width_, height_;
-    float rotation_;
-    Color color_;
+    //==========================================================================
+    // CORE IDENTIFICATION
+    //==========================================================================
+    int payload_id_;                            // Unique payload identifier
+    Simulator* sim_;                            // Pointer to simulator
 
-    // Task related properties
-    bool task_completed_;              
-    float target_tolerance_;           
-    Eigen::Vector2d velocity_;         
-
-    // Box2D properties
-    b2Body* physicsBody_;
-    b2World* physicsWorld_;
-
-    // update and draw functions
-    void update();
-    void draw();
+    //==========================================================================
+    // PHYSICAL PROPERTIES
+    //==========================================================================
+    // Geometric properties
+    float width_, height_;                      // Payload dimensions
+    Color color_;                               // Visualization color
     
-    // Create the physical entity
-    void createPhysicsBody(float density);
-    std::pair<std::vector<Eigen::Vector2d>, std::vector<Eigen::Vector2d>> getContactPointsAndNormals() const;
-    double getRotationFromQuaternion(const Eigen::Quaterniond& q) const;
+    // Dynamic properties
+    double mass_;                               // Payload mass
+    double moment_of_inertia_;                  // Rotational inertia
+    double current_angular_velocity_;           // Current angular velocity
 
+    //==========================================================================
+    // SPATIAL STATE
+    //==========================================================================
+    // Position and velocity
+    Eigen::Vector2d position_;                  // Current position [x, y]
+    Eigen::Vector2d velocity_;                  // Current linear velocity
+    float rotation_;                            // Current rotation angle (radians)
+    
+    // Orientation (quaternion representation)
+    Eigen::Quaterniond initial_orientation_ = Eigen::Quaterniond::Identity();   // Initial orientation
+    Eigen::Quaterniond current_orientation_ = Eigen::Quaterniond::Identity();   // Current orientation
+    Eigen::Quaterniond target_orientation_ = Eigen::Quaterniond::Identity();    // Target orientation
+
+    //==========================================================================
+    // TARGET & TASK MANAGEMENT
+    //==========================================================================
+    Eigen::Vector2d target_position_;          // Desired final position
+    bool task_completed_;                       // Task completion flag
+    float target_tolerance_;                    // Distance tolerance for target reaching
+
+    //==========================================================================
+    // PHYSICS INTEGRATION
+    //==========================================================================
+
+
+
+    int mujoco_body_id_;                        // MuJoCo body identifier
+    mjModel* mujoco_model_;
+    mjData* mujoco_data_;
+
+    
+    void syncToMuJoCo();
+    void syncFromMuJoCo();
+    void setMuJoCoReferences(mjModel* model, mjData* data);
+
+    //==========================================================================
+    // PHYSICS BODY MANAGEMENT
+    //==========================================================================
+    void createMuJoCoBody(float density);
+
+    Eigen::Vector2d getMuJoCoPosition() const;
+    Eigen::Vector2d getMuJoCoVelocity() const;
+    double getMuJoCoRotation() const;
+    double getMuJoCoAngularVelocity() const;
+    double getMuJoCoMass() const;
+    double getMuJoCoInertia() const;
+
+    // 状态设置
+    void setMuJoCoPosition(const Eigen::Vector2d& position);
+    void setMuJoCoVelocity(const Eigen::Vector2d& velocity);
+    void setMuJoCoRotation(double rotation);
+    void setMuJoCoAngularVelocity(double angular_velocity);
+    void applyMuJoCoForce(const Eigen::Vector2d& force, const Eigen::Vector2d& point = Eigen::Vector2d::Zero());
+    void applyMuJoCoTorque(double torque);
+
+    //==========================================================================
+    // CONTACT INTERFACE
+    //==========================================================================
+    // Contact geometry for robot interaction
+    std::pair<std::vector<Eigen::Vector2d>, std::vector<Eigen::Vector2d>> 
+        getContactPointsAndNormals() const;    // Get contact points and normals
+
+    //==========================================================================
+    // TARGET CONTROL
+    //==========================================================================
+    // Position targets
     void setTarget(const Eigen::Vector2d& target);
     void setTarget(const Eigen::Vector2d& target_position, const Eigen::Quaterniond& target_orientation);
-    bool isAtTarget() const;
-    Eigen::Vector2d getDistanceToTarget() const;
-    float getDistanceToTargetMagnitude() const;
-    double getAngularVelocity() const;
-    float getMass() const;
-    double getMomentOfInertia() const;
-    Eigen::Vector2d getRequiredPushDirection() const;
-    bool shouldStopPushing() const;
     
+    // Orientation targets
+    void setTargetFromRelativeRotation(double relative_rotation_rad);
+    void updateTargetOrientation();
+
+    //==========================================================================
+    // STATE QUERIES
+    //==========================================================================
+    // Position and orientation
     Eigen::Vector2d getPosition() const;
     Eigen::Quaterniond getRotation() const;
     Eigen::Vector2d getVelocity() const;
+    double getAngularVelocity() const;
+    
+    // Physical properties
+    float getMass() const;
+    double getMomentOfInertia() const;
+    
+    // Target tracking
+    bool isAtTarget() const;
+    Eigen::Vector2d getDistanceToTarget() const;
+    float getDistanceToTargetMagnitude() const;
     double getRotationError() const;
+    
+    // Control assistance
+    Eigen::Vector2d getRequiredPushDirection() const;
+    bool shouldStopPushing() const;
 
-    void setTargetFromRelativeRotation(double relative_rotation_rad);  // 新增方法
-    void updateTargetOrientation();  // 新增：更新目标朝向的方法
+    //==========================================================================
+    // SIMULATION INTERFACE
+    //==========================================================================
+    void update();                              // Update payload state
+    void draw();                                // Render payload visualization
 
-    private:
-        Simulator* sim_;
+    //==========================================================================
+    // UTILITY METHODS
+    //==========================================================================
+    double getRotationFromQuaternion(const Eigen::Quaterniond& q) const;
+
+private:
+    //==========================================================================
+    // PRIVATE MEMBERS
+    //==========================================================================
+    // Additional private state or helper methods can be added here
 };
 
-# endif // PAYLOAD_H
+#endif // PAYLOAD_H

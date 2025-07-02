@@ -250,6 +250,87 @@ Message Factor::marginalise_factor_dist(const Eigen::VectorXd &eta, const Eigen:
     return marginalised_msg;
 };    
 
+
+ForceAllocationFactor::ForceAllocationFactor(int f_id, int r_id, 
+                                           std::vector<std::shared_ptr<Variable>> variables,
+                                           float sigma, const Eigen::VectorXd& measurement,
+                                           const std::vector<Eigen::Vector2d>& contact_points,
+                                           const std::vector<Eigen::Vector2d>& contact_normals)
+    : Factor{f_id, r_id, variables, sigma, measurement, -1},
+      contact_points_(contact_points), contact_normals_(contact_normals),
+      n_contact_points_(contact_points.size()) {
+    
+    factor_type_ = FORCE_ALLOCATION_FACTOR;
+    this->linear_ = true;
+    
+    desired_wrench_ = Eigen::Vector3d::Zero();
+    
+    if (n_contact_points_ > 0) {
+        computeGMatrix();
+    }
+    
+    std::cout << "ForceAllocationFactor created with " << n_contact_points_ 
+              << " contact points" << std::endl;
+}
+
+void ForceAllocationFactor::updateGeometry(const std::vector<Eigen::Vector2d>& contact_points,
+                                         const std::vector<Eigen::Vector2d>& contact_normals) {
+    contact_points_ = contact_points;
+    contact_normals_ = contact_normals;
+    n_contact_points_ = contact_points.size();
+    
+    if (n_contact_points_ > 0) {
+        computeGMatrix();
+    }
+}
+
+void ForceAllocationFactor::updateDesiredWrench(const Eigen::Vector3d& desired_wrench) {
+    desired_wrench_ = desired_wrench;
+}
+
+void ForceAllocationFactor::computeGMatrix() {
+    // G矩阵：[3 x n_contacts]，将接触力映射到payload上的合力和力矩
+    G_matrix_ = Eigen::MatrixXd::Zero(3, n_contact_points_);
+    
+    for (int i = 0; i < n_contact_points_; i++) {
+        Eigen::Vector2d contact_normal = contact_normals_[i];
+        Eigen::Vector2d r_vector = contact_points_[i];  // 接触点相对payload中心的位置
+        
+        // 力的贡献: f_i * n_i
+        G_matrix_(0, i) = contact_normal.x();  // x方向力
+        G_matrix_(1, i) = contact_normal.y();  // y方向力
+        
+        // 力矩的贡献: τ = r × f = r_x * f_y - r_y * f_x
+        double torque_contribution = r_vector.x() * contact_normal.y() - r_vector.y() * contact_normal.x();
+        G_matrix_(2, i) = torque_contribution;
+    }
+    
+    std::cout << "G matrix computed (3x" << n_contact_points_ << "):\n" << G_matrix_ << std::endl;
+}
+
+Eigen::MatrixXd ForceAllocationFactor::h_func_(const Eigen::VectorXd& X) {
+    // X = [contact_forces(n_contacts)]  // 所有机器人的接触力
+    // 测量函数: h = G * f - w_desired = 0
+    
+    if (X.size() != n_contact_points_) {
+        std::cerr << "ForceAllocationFactor: X.size() = " << X.size() 
+                  << " != n_contact_points = " << n_contact_points_ << std::endl;
+        return Eigen::MatrixXd::Zero(3, 1);
+    }
+    
+    Eigen::VectorXd contact_forces = X;  // [f1, f2, f3, f4, ...]
+    Eigen::Vector3d actual_wrench = G_matrix_ * contact_forces;
+    Eigen::Vector3d wrench_error = actual_wrench - desired_wrench_;
+    
+    return wrench_error;  // [fx_error, fy_error, τ_error]
+}
+
+Eigen::MatrixXd ForceAllocationFactor::J_func_(const Eigen::VectorXd& X) {
+    // 对于线性系统 h = G * f - w_desired，雅可比就是 G 矩阵
+    return G_matrix_;  // [3 x n_contacts]
+}
+
+
 /********************************************************************************************/
 /********************************************************************************************/
 //                      CUSTOM FACTORS SPECIFIC TO THE PROBLEM

@@ -79,10 +79,49 @@ class Globals {
     bool USE_DIRECT_PAYLOAD_VELOCITY; // 是否使用直接速度控制
     bool DRAW_ROBOT_VELOCITIES;
     float SIGMA_FACTOR_PAYLOAD_TWIST;
+    float SIGMA_FACTOR_FORCE_ALLOCATION;
+    bool USE_FORCE_ALLOCATION;
     
     Globals();
     int parse_global_args(DArgs::DArgs& dargs);
     void parse_global_args(std::ifstream& config_file);
     void post_parsing();
 
+    bool USE_MUJOCO_PHYSICS;
+    std::string MUJOCO_MODEL_FILE;
+    float MUJOCO_TIMESTEP;
+    int MUJOCO_SOLVER_ITERATIONS;
+    float MUJOCO_CONTACT_STIFFNESS;
+    float MUJOCO_CONTACT_DAMPING;
+    std::vector<float> MUJOCO_GRAVITY;
+    bool MUJOCO_ENABLE_VISUALIZATION;
+    int MUJOCO_VISUALIZATION_WIDTH;
+    int MUJOCO_VISUALIZATION_HEIGHT;
+    
+    // 高级MuJoCo设置
+    std::string MUJOCO_INTEGRATOR;
+    std::string MUJOCO_CONE;
+    std::string MUJOCO_JACOBIAN;
+    std::string MUJOCO_SOLVER;
+    int MUJOCO_ITERATIONS;
+    float MUJOCO_TOLERANCE;
+    int MUJOCO_LS_ITERATIONS;
+    float MUJOCO_LS_TOLERANCE;
+    
+    // 接触模型参数
+    float MUJOCO_CONTACT_MARGIN;
+    float MUJOCO_CONTACT_GAP;
+    float MUJOCO_CONTACT_FRICTION_LOSS;
+    std::vector<float> MUJOCO_CONTACT_SOLREF;
+    std::vector<float> MUJOCO_CONTACT_SOLIMP;
+    
+    // 调试设置
+    bool ENABLE_PHYSICS_LOGGING;
+    bool LOG_CONTACT_FORCES;
+    bool LOG_JOINT_CONSTRAINTS;
+    bool PHYSICS_DEBUG_VISUALIZATION;
+
+
 };
+
+extern Globals globals;
