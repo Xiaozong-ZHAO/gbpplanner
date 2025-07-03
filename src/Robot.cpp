@@ -49,6 +49,10 @@ Robot::Robot(Simulator* sim,
     /***************************************************************************/
     Color var_color = color_; double sigma; int n = globals.N_DOFS;
     Eigen::VectorXd mu(n); Eigen::VectorXd sigma_list(n); 
+
+    const auto& payloads_ = sim->getPayload();
+
+
     for (int i = 0; i < num_variables_; i++){
         // Set initial mu and covariance of variable interpolated between start and horizon
         mu = start + (horizon - start) * (float)(variable_timesteps[i]/(float)variable_timesteps.back());
@@ -88,6 +92,10 @@ Robot::Robot(Simulator* sim,
         for (auto var : fac_obs->variables_) var->add_factor(fac_obs);
         this->factors_[fac_obs->key_] = fac_obs;
     }
+
+    // for (auto& [pid, payload]: payloads_) {
+    //     createPayloadFactors(payload);
+    // }
 
 };
 
@@ -141,41 +149,11 @@ void Robot::detachFromPayload() {
     }
 }
 
-void Robot::updatePayloadFactors(const std::map<int, std::shared_ptr<Payload>>& payloads) {
-    // 简化：所有机器人都应该与payload交互，不需要距离判断
-    for (auto& [pid, payload] : payloads) {
-        bool is_connected = std::find(connected_payload_ids_.begin(), connected_payload_ids_.end(), pid) 
-                           != connected_payload_ids_.end();
-        
-        if (!is_connected) {
-            createPayloadFactors(payload);
-        }
-    }
-    
-    // 检查是否有payload被删除
-    for (auto it = connected_payload_ids_.begin(); it != connected_payload_ids_.end();) {
-        int pid = *it;
-        if (payloads.find(pid) == payloads.end()) {
-            // payload不存在，需要删除（这里简化处理，实际中payload很少被删除）
-            it = connected_payload_ids_.erase(it);
-        } else {
-            ++it;
-        }
-    }
-}
-
 void Robot::createPayloadFactors(std::shared_ptr<Payload> payload) {
     int pid = payload->payload_id_;
     
     // 直接使用getContactPointsAndNormals获取接触点和法向量
-    auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
-    
-    if (assigned_contact_point_index_ >= contact_points.size()) {
-        std::cout << "Warning: Robot " << rid_ << " assigned contact point index " 
-                  << assigned_contact_point_index_ << " out of range" << std::endl;
-        return;
-    }
-    
+    auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();    
     // 使用分配的接触点
     Eigen::Vector2d target_contact_point = contact_points[assigned_contact_point_index_];
     Eigen::Vector2d contact_normal = contact_normals[assigned_contact_point_index_];
@@ -280,7 +258,7 @@ void Robot::createPhysicsBody(){
 
     physicsBody_->CreateFixture(&fixtureDef);
     
-    physicsBody_->SetLinearDamping(0.1f);
+    // physicsBody_->SetLinearDamping(0.0f);
 }
 
 /***************************************************************************************************/

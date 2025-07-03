@@ -67,6 +67,9 @@
         "numeric": "cpp",
         "semaphore": "cpp",
         "__nullptr": "cpp",
-        "core": "cpp"
+        "core": "cpp",
+        "codecvt": "cpp",
+        "condition_variable": "cpp",
+        "typeindex": "cpp"
     }
 }

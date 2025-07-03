@@ -59,7 +59,6 @@ public:
     b2WeldJoint* payload_joint_;  // 新增：与payload的焊接关节
 
     // 简化后的payload相关方法
-    void updatePayloadFactors(const std::map<int, std::shared_ptr<Payload>>& payloads);
     void createPayloadFactors(std::shared_ptr<Payload> payload);
     void deletePayloadFactors(std::shared_ptr<Payload> payload);
     

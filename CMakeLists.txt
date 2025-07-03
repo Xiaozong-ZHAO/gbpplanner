@@ -32,37 +32,11 @@ add_executable(gbpplanner
 )
 target_link_libraries(gbpplanner PUBLIC gbp box2d)
 
-# 先定义目标，再链接库
-add_executable(payload_simulator
- src/entry.cpp
- src/Globals.cpp
- src/Robot.cpp
- src/Simulator.cpp
- src/Utils.cpp
- src/Graphics.cpp
- src/Payload.cpp
-)
 
-# 包含头文件目录
-target_include_directories(payload_simulator PUBLIC
-${CMAKE_CURRENT_SOURCE_DIR}/inc
-${CMAKE_CURRENT_SOURCE_DIR}/thirdparty
-)
-
-# 链接库
-target_link_libraries(payload_simulator PUBLIC
-    gbp
- raylib
- box2d
- OpenMP::OpenMP_CXX
-)
-
-# 移除了错误的链接行，因为已经在上面正确链接了 box2d
-# 不需要：target_link_libraries(payload_simulator PUBLIC Box2D::Box2D)
 
 # Checks if OSX and links appropriate frameworks (only required on MacOS)
 if(APPLE)
- foreach(target gbpplanner payload_simulator)
+ foreach(target gbpplanner)
  target_link_libraries(${target} PUBLIC
 "-framework Cocoa"
 "-framework OpenGL"

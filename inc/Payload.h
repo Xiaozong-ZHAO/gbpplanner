@@ -50,6 +50,7 @@ class Payload {
     void createPhysicsBody(float density);
     std::pair<std::vector<Eigen::Vector2d>, std::vector<Eigen::Vector2d>> getContactPointsAndNormals() const;
     double getRotationFromQuaternion(const Eigen::Quaterniond& q) const;
+    
 
     void setTarget(const Eigen::Vector2d& target);
     void setTarget(const Eigen::Vector2d& target_position, const Eigen::Quaterniond& target_orientation);
@@ -59,11 +60,12 @@ class Payload {
     double getAngularVelocity() const;
     float getMass() const;
     double getMomentOfInertia() const;
+    Eigen::Vector2d getTarget();
     Eigen::Vector2d getRequiredPushDirection() const;
     bool shouldStopPushing() const;
     
     Eigen::Vector2d getPosition() const;
-    Eigen::Quaterniond getRotation() const;
+    Eigen::Quaterniond getTargetRotation() const;
     Eigen::Vector2d getVelocity() const;
     double getRotationError() const;
 

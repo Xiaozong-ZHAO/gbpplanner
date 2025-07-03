@@ -34,12 +34,14 @@ Simulator::Simulator(){
     ImageColorInvert(&obstacleImg);
     graphics = new Graphics(obstacleImg);
 
-    if (globals.FORMATION == "Payload"){
-        createPayload(Eigen::Vector2d(0., 0.), globals.PAYLOAD_WIDTH, globals.PAYLOAD_HEIGHT);
-    }
+
+    createPayload(Eigen::Vector2d(0., 0.), globals.PAYLOAD_WIDTH, globals.PAYLOAD_HEIGHT);
+    
 };
 
-
+std::map<int, std::shared_ptr<Payload>> Simulator::getPayload(){
+    return payloads_;
+}
 
 void Simulator::createPayload(Eigen::Vector2d position, float width, float height) {
     auto payload = std::make_shared<Payload>(this, next_payload_id_++, position, width, height, globals.PAYLOAD_DENSITY);
@@ -55,13 +57,9 @@ void Simulator::createPayload(Eigen::Vector2d position, float width, float heigh
     // 关键修复：使用相对旋转设置目标朝向
     if (std::abs(globals.TARGET_RELATIVE_ROTATION) > 0.001) {  // 如果有旋转目标
         payload->setTargetFromRelativeRotation(globals.TARGET_RELATIVE_ROTATION);
-        
-        std::cout << "Payload target: position(" << absolute_target_position.x() << ", " << absolute_target_position.y() 
-                  << ") relative_rotation(" << globals.TARGET_RELATIVE_ROTATION << " rad)" << std::endl;
     } else {
         // 如果没有旋转目标，目标朝向等于初始朝向
         payload->target_orientation_ = payload->initial_orientation_;
-        std::cout << "Payload target: position only, no rotation" << std::endl;
     }
 }
 
@@ -103,56 +101,16 @@ void Simulator::draw(){
             for (auto [pid, payload]: payloads_) {
                 payload->draw();
             }
-            
-            // Draw Contact points and normals (old method - real robot-payload contacts)
-            for (auto [rid, robot] : robots_) {
-                for (auto [pid, payload] : payloads_) {
-                    if (isRobotContactingPayload(rid, pid)) {
-                        auto [contactPoint, contactNormal] = getContactPoint(rid, pid);
-                        if (contactPoint == Eigen::Vector2d::Zero()) continue;
-                        
-                        // 绘制真实接触点
-                        Vector3 contactPose3D = {
-                            (float) contactPoint.x(),
-                            1.5f,
-                            (float) contactPoint.y()
-                        };
-                        DrawSphere(contactPose3D, 0.5f, RED);
-                        
-                        // 绘制真实接触法向量
-                        Vector3 normalEnd = {
-                            (float) (contactPoint.x() + contactNormal.x()),
-                            1.5f,
-                            (float) (contactPoint.y() + contactNormal.y())
-                        };
-                        DrawLine3D(contactPose3D, normalEnd, BLUE);
-                    }
-                }
+
+            // Draw the points in Simulator::endings_
+            for (const auto& ending : endings_) {
+                DrawSphereEx(Vector3{
+                    static_cast<float>(ending.x()),
+                    0.5f,
+                    static_cast<float>(ending.y())
+                } , 0.2f, 16, 16, RED);
             }
-            
-            // Draw fixed contact points and normals from Payload::getContactPointsAndNormals()
-            for (auto [pid, payload] : payloads_) {
-                auto [fixedContactPoints, fixedContactNormals] = payload->getContactPointsAndNormals();
-                
-                for (size_t i = 0; i < fixedContactPoints.size(); i++) {
-                    // 绘制固定接触点
-                    Vector3 fixedPointPos3D = {
-                        (float) fixedContactPoints[i].x(),
-                        1.8f, // 稍微高一点以区分
-                        (float) fixedContactPoints[i].y()
-                    };
-                    DrawSphere(fixedPointPos3D, 0.4f, YELLOW); // 用黄色区分
-                    
-                    // 绘制固定接触点的法向量
-                    Vector3 fixedNormalEnd = {
-                        (float) (fixedContactPoints[i].x() + fixedContactNormals[i].x()),
-                        1.8f,
-                        (float) (fixedContactPoints[i].y() + fixedContactNormals[i].y())
-                    };
-                    DrawLine3D(fixedPointPos3D, fixedNormalEnd, GREEN); // 用绿色表示固定法向量
-                }
-            }
-            
+
         EndMode3D();
         draw_info(clock_);
     EndDrawing();
@@ -161,24 +119,6 @@ void Simulator::draw(){
 /*******************************************************************************/
 // Timestep loop of simulator.
 /*******************************************************************************/
-void Simulator::moveRobot(){
-    // Update the robot current and horizon states by one timestep
-
-    for (int i=0; i<globals.NUM_ITERS; i++){
-        iterateGBP(1, INTERNAL, robots_);
-        // iterateGBP(1, EXTERNAL, robots_);
-    }
-    for (auto [r_id, robot] : robots_) {
-        robot->updateHorizon();
-        robot->updateCurrent();
-    }
-
-    // Increase simulation clock by one timestep
-    clock_++;
-    // print the clock_
-    if (clock_ >= globals.MAX_TIME ) globals.RUN = false;
-}
-
 bool Simulator::isRobotContactingPayload(int robot_id, int payload_id) {
     // 获取机器人和payload的物理体
     auto robot_it = robots_.find(robot_id);
@@ -249,6 +189,15 @@ Eigen::VectorXd Simulator::solveConstrainedLeastSquares(const Eigen::MatrixXd &G
     std::cout << "Residual: " << (G * f - w_cmd).norm() << std::endl;
     
     return f;
+}
+
+Eigen::MatrixXd Simulator::Quat2Rot(Eigen::Quaterniond q) {
+    Eigen::MatrixXd R(2, 2);
+    R(0, 0) = q.w() * q.w() + q.x() *q.x() - q.y() * q.y() - q.z() * q.z();
+    R(0, 1) = 2 * (q.x() * q.y() - q.w() * q.z());
+    R(1, 0) = 2 * (q.x() * q.y() + q.w() * q.z());
+    R(1, 1) = q.w() * q.w() - q.x() * q.x() + q.y() * q.y() - q.z() * q.z();
+    return R;
 }
 
 void Simulator::computeLeastSquares(){
@@ -422,7 +371,6 @@ void Simulator::timestep() {
     // 更新因子（只在GBP模式下需要）
     if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
         for (auto [r_id, robot] : robots_) {
-            robot->updatePayloadFactors(payloads_);
             robot->updateInterrobotFactors();
         }
     }
@@ -440,17 +388,6 @@ void Simulator::timestep() {
         for (auto [r_id, robot] : robots_) {
             robot->updateHorizon();
             robot->updateCurrent();
-        }
-    }
-    
-    // 物理世界更新
-    if (physicsWorld_) {
-        physicsWorld_->Step(globals.TIMESTEP, 8, 3);
-        for (auto [r_id, robot] : robots_) {
-            robot->syncPhysicsToLogical();
-        }
-        for (auto [p_id, payload] : payloads_) {
-            payload->update();
         }
     }
     
@@ -556,27 +493,6 @@ void Simulator::eventHandler(){
     // Update the graphics if the camera has moved
     graphics->update_camera();
 }
-
-void Simulator::createSingleRobot(){
-    // Create a single robot at the specified position
-    if (!new_robots_needed_) return;
-    new_robots_needed_ = false;
-    std::vector<std::shared_ptr<Robot>> robots_to_create{};
-    Eigen::VectorXd starting = Eigen::VectorXd{{-25., 0., 0.,0.}};
-    Eigen::VectorXd ending = Eigen::VectorXd{{25., 0., 0.,0.}};
-    // print the starting and ending positions
-    std::cout << "Starting: " << starting.transpose() << std::endl;
-    std::cout << "Ending: " << ending.transpose() << std::endl;
-    std::deque<Eigen::VectorXd> waypoints{starting, ending};
-    float robot_radius = globals.ROBOT_RADIUS;
-    Color robot_color = ColorFromHSV(0, 1., 0.75);
-    robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
-    for (auto& robot : robots_to_create) {
-        robots_[robot->rid_] = robot;
-        robot_positions_[robot->rid_] = std::vector<double>{robot->position_(0), robot->position_(1)};
-    }
-}
-
 /*******************************************************************************/
 // Create new robots if needed. Handles deletion of robots out of bounds. 
 // New formations must modify the vectors "robots to create" and optionally "robots_to_delete"
@@ -591,33 +507,7 @@ void Simulator::createOrDeleteRobots(){
     std::vector<std::shared_ptr<Robot>> robots_to_delete{};
     Eigen::VectorXd starting, turning, ending; // Waypoints : [x,y,xdot,ydot].
 
-    if (globals.FORMATION=="circle"){
-    // Robots must travel to opposite sides of circle
-        new_robots_needed_ = false;
-        float min_circumference_spacing = 5.*globals.ROBOT_RADIUS;
-        double min_radius = 0.25 * globals.WORLD_SZ;
-        Eigen::VectorXd centre{{0., 0., 0.,0.}};
-        for (int i=0; i<globals.NUM_ROBOTS; i++){
-            // Select radius of large circle to be at least min_radius,
-            // Also ensures that robots in the circle are at least min_circumference_spacing away from each other
-            float radius_circle = (globals.NUM_ROBOTS==1) ? min_radius : 
-                std::max(min_radius, sqrt(min_circumference_spacing / (2. - 2.*cos(2.*PI/(double)globals.NUM_ROBOTS))));
-            Eigen::VectorXd offset_from_centre = Eigen::VectorXd{{radius_circle * cos(2.*PI*i/(float)globals.NUM_ROBOTS)},
-                                                            {radius_circle * sin(2.*PI*i/(float)globals.NUM_ROBOTS)},
-                                                            {0.},{0.}};
-            starting = centre + offset_from_centre;
-            ending = centre - offset_from_centre;
-            // print the starting and ending positions
-            std::cout << "Starting: " << starting.transpose() << std::endl;
-            std::cout << "Ending: " << ending.transpose() << std::endl;
-            std::deque<Eigen::VectorXd> waypoints{starting, ending};
-            
-            // Define robot radius and colour here.
-            float robot_radius = globals.ROBOT_RADIUS;
-            Color robot_color = ColorFromHSV(i*360./(float)globals.NUM_ROBOTS, 1., 0.75);
-            robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
-        }
-    } else if (globals.FORMATION == "Payload") {
+    if (globals.FORMATION == "Payload") {
         new_robots_needed_ = false;
         float robot_radius = globals.ROBOT_RADIUS;
         
@@ -625,7 +515,11 @@ void Simulator::createOrDeleteRobots(){
         if (payloads_.empty()) return;
         
         auto payload = payloads_.begin()->second;
+
         auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
+        Eigen::Vector2d payload_centroid = payload->getPosition();
+        Eigen::Vector2d payload_target = payload->getTarget();
+        Eigen::MatrixXd payload_R = Quat2Rot(payload->getTargetRotation());
         
         if (contact_points.empty()) {
             std::cout << "Warning: No contact points available for payload" << std::endl;
@@ -641,13 +535,21 @@ void Simulator::createOrDeleteRobots(){
             Eigen::Vector2d contact_normal = contact_normals[contact_point_index];
             
             // 机器人初始位置：接触点 - 机器人半径 * 法向量
-            Eigen::Vector2d robot_start_pos = contact_point - robot_radius * contact_normal;
+            Eigen::Vector2d robot_start_pos = contact_point; /*- robot_radius * contact_normal;*/
             
             Eigen::VectorXd starting(4);
             starting << robot_start_pos.x(), robot_start_pos.y(), 0.0, 0.0;
-            
-            Eigen::VectorXd ending = starting;
-            
+
+            Eigen::Vector2d relative_r = payload_R * (contact_point - payload_centroid);
+
+            Eigen::VectorXd ending(4);
+
+            ending << payload_target.x() + relative_r.x(), 
+                    payload_target.y() + relative_r.y(),
+                    0.0, 0.0;
+            // store the first 2 elements in ending to simulator::endings
+            endings_.push_back(Eigen::Vector2d(ending(0), ending(1)));
+
             std::deque<Eigen::VectorXd> waypoints{starting, ending};
             
             Color robot_color = ColorFromHSV(contact_point_index * 360.0f / contact_points.size(), 1.0f, 0.75f);
@@ -663,70 +565,6 @@ void Simulator::createOrDeleteRobots(){
                       << " at position (" << contact_point.x() << ", " << contact_point.y() << ")" << std::endl;
         }
         
-    } else if (globals.FORMATION=="junction"){
-    // Robots in a cross-roads style junction. There is only one-way traffic, and no turning.        
-        new_robots_needed_ = true;      // This is needed so that more robots can be created as the simulation progresses.
-        if (clock_%20==0){              // Arbitrary condition on the simulation time to create new robots
-            int n_roads = 2;
-            int road = random_int(0,n_roads-1);
-            Eigen::Matrix4d rot; rot.setZero();
-            rot.topLeftCorner(2,2) << cos(PI/2.*road), -sin(PI/2.*road), sin(PI/2.*road), cos(PI/2.*road);
-            rot.bottomRightCorner(2,2) << cos(PI/2.*road), -sin(PI/2.*road), sin(PI/2.*road), cos(PI/2.*road);
-
-            int n_lanes = 2;
-            int lane = random_int(0,n_lanes-1);
-            double lane_width = 4.*globals.ROBOT_RADIUS;
-            double lane_v_offset = (0.5*(1-n_lanes)+lane)*lane_width;
-            starting = rot * Eigen::VectorXd{{-globals.WORLD_SZ/2., lane_v_offset, globals.MAX_SPEED, 0.}};
-            ending = rot * Eigen::VectorXd{{(double)globals.WORLD_SZ, lane_v_offset, 0., 0.}};
-            std::deque<Eigen::VectorXd> waypoints{starting, ending};
-            float robot_radius = globals.ROBOT_RADIUS;
-            Color robot_color = DARKGREEN;
-            robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
-        }
-
-        // Delete robots if out of bounds
-        for (auto [rid, robot] : robots_){
-            if (abs(robot->position_(0))>globals.WORLD_SZ/2 || abs(robot->position_(1))>globals.WORLD_SZ/2){
-                robots_to_delete.push_back(robot);
-            }
-        }
-
-    } else if (globals.FORMATION=="junction_twoway"){
-    // Robots in a two-way junction, turning LEFT (RED), RIGHT (BLUE) or STRAIGHT (GREEN)
-        new_robots_needed_ = true;   // This is needed so that more robots can be created as the simulation progresses.
-        if (clock_%20==0){           // Arbitrary condition on the simulation time to create new robots
-            int n_roads = 4;
-            int road = random_int(0,n_roads-1);
-            // We will define one road (the one going left) and then we can rotate the positions for other roads.
-            Eigen::Matrix4d rot; rot.setZero();
-            rot.topLeftCorner(2,2) << cos(PI/2.*road), -sin(PI/2.*road), sin(PI/2.*road), cos(PI/2.*road);
-            rot.bottomRightCorner(2,2) << cos(PI/2.*road), -sin(PI/2.*road), sin(PI/2.*road), cos(PI/2.*road);
-
-            int n_lanes = 2;
-            int lane = random_int(0,n_lanes-1);
-            int turn = random_int(0,2);
-            double lane_width = 4.*globals.ROBOT_RADIUS;
-            double lane_v_offset = (0.5*(1-2.*n_lanes)+lane)*lane_width;
-            double lane_h_offset = (1-turn)*(0.5+lane-n_lanes)*lane_width;
-            starting = rot * Eigen::VectorXd{{-globals.WORLD_SZ/2., lane_v_offset, globals.MAX_SPEED, 0.}};
-            turning = rot * Eigen::VectorXd{{lane_h_offset, lane_v_offset, (turn%2)*globals.MAX_SPEED, (turn-1)*globals.MAX_SPEED}};
-            ending = rot * Eigen::VectorXd{{lane_h_offset + (turn%2)*globals.WORLD_SZ*1., lane_v_offset + (turn-1)*globals.WORLD_SZ*1., 0., 0.}};
-            std::deque<Eigen::VectorXd> waypoints{starting, turning, ending};
-            float robot_radius = globals.ROBOT_RADIUS;
-            Color robot_color = ColorFromHSV(turn*120., 1., 0.75);
-            robots_to_create.push_back(std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld()));
-        }
-        
-        // Delete robots if out of bounds
-        for (auto [rid, robot] : robots_){
-            if (abs(robot->position_(0))>globals.WORLD_SZ/2 || abs(robot->position_(1))>globals.WORLD_SZ/2){
-                robots_to_delete.push_back(robot);
-            }
-        }
-    } else {
-        print("Shouldn't reach here, formation not defined!");
-        // Define new formations here!
     }        
     
     // Create robots first

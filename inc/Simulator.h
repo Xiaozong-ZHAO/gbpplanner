@@ -50,6 +50,7 @@ public:
     KDTree* treeOfRobots_;
 
     // Image representing the obstacles in the environment
+    std::vector<Eigen::Vector2d> endings_;
     Image obstacleImg;
 
     int next_rid_ = 0;                              // New robots will use this rid. It should be ++ incremented when this happens
@@ -84,13 +85,13 @@ public:
     // New formations must modify the vectors "robots to create" and optionally "robots_to_delete"
     // by appending (push_back()) a shared pointer to a Robot class.
     /*******************************************************************************/    
+    std::map<int, std::shared_ptr<Payload>> getPayload();
     void assignContactPoints();
     void updateDistributedPayloadControl();
     // 辅助方法
     std::vector<int> getNearbyRobots(int payload_id, double radius);
     void reassignLostContacts(int payload_id);
-    
-    void createSingleRobot();
+
     void createOrDeleteRobots();
     void isRobotContactngPayload(int robot_id, int payload_id);
     void createPayload(Eigen::Vector2d position, float width, float height);
@@ -102,6 +103,7 @@ public:
     void applyDirectPayloadVelocityControl();
     Eigen::Vector2d computeDesiredPayloadVelocity(std::shared_ptr<Payload> payload);
     double computeDesiredPayloadAngularVelocity(std::shared_ptr<Payload> payload);
+    Eigen::MatrixXd Quat2Rot(Eigen::Quaterniond q);
 
     /*******************************************************************************/
     // Set a proportion of robots to not perform inter-robot communications
@@ -112,8 +114,6 @@ public:
     // Timestep loop of simulator.
     /*******************************************************************************/
     void timestep();
-
-    void moveRobot();
 
     /*******************************************************************************/
     // Drawing graphics.

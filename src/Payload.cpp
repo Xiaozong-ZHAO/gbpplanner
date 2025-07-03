@@ -62,9 +62,9 @@ void Payload::createPhysicsBody(float density){
     
     physicsBody_->CreateFixture(&fixtureDef);
     
-    // 设置阻尼
-    physicsBody_->SetLinearDamping(0.2f);   // 线性阻尼
-    physicsBody_->SetAngularDamping(0.3f);  // 角度阻
+    // // 设置阻尼
+    // physicsBody_->SetLinearDamping(0.0f);   // 线性阻尼
+    // physicsBody_->SetAngularDamping(0.0f);  // 角度阻
 }
 
 void Payload::setTargetFromRelativeRotation(double relative_rotation_rad) {
@@ -97,6 +97,10 @@ void Payload::setTarget(const Eigen::Vector2d& target_position, const Eigen::Qua
     target_position_ = target_position;
     target_orientation_ = target_orientation;
     task_completed_ = false;
+}
+
+Eigen::Vector2d Payload::getTarget(){
+    return target_position_;
 }
 
 void Payload::draw() {
@@ -203,8 +207,8 @@ double Payload::getAngularVelocity() const {
     return 0.0;
 }
 
-Eigen::Quaterniond Payload::getRotation() const{
-    return current_orientation_;
+Eigen::Quaterniond Payload::getTargetRotation() const{
+    return target_orientation_;
 }
 
 // 修改getRotationError方法使用正确的目标朝向
@@ -246,13 +250,13 @@ std::pair<std::vector<Eigen::Vector2d>, std::vector<Eigen::Vector2d>> Payload::g
     
     // 在局部坐标系中定义接触点和法向量
     // 上边的两个点
-    Eigen::Vector2d local_top1(-width_/4, -height_/2);
-    Eigen::Vector2d local_top2(width_/4, -height_/2);
+    Eigen::Vector2d local_top1(0, -height_/2);
+    Eigen::Vector2d local_top2(0, height_/2);
     Eigen::Vector2d local_top_normal(0, 1); // 向payload内部（向下）
     
     // 左边的两个点
-    Eigen::Vector2d local_left1(-width_/2, height_/4);
-    Eigen::Vector2d local_left2(-width_/2, -height_/4);
+    Eigen::Vector2d local_left1(-width_/2, 0);
+    Eigen::Vector2d local_left2(width_/2, 0);
     Eigen::Vector2d local_left_normal(1, 0); // 向payload内部（向右）
     
     // 转换到世界坐标系
