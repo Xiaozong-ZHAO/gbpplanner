@@ -390,16 +390,44 @@ Eigen::MatrixXd DynamicsFactor::J_func_(const Eigen::VectorXd& X){
 // position at the same timestep (collision). This factor is created between variables of two robots.
 // The factor has 0 energy if the variables are further away than the safety distance. skip_ = true in this case.
 /********************************************************************************************/
-// PayloadFactor::PayloadFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
-//     float sigma, const Eigen::VectorXd& measurement,
-//     float robot_radius)
-//     : Factor{f_id, r_id, variables, sigma, measurement} {
-//         factor_type_ = PAYLOAD_FACTOR;
-//         // Change the parameters below:
-//         float eps = 0.2 * robot_radius;
-//         this->safety_distance_ = 2*robot_radius + eps; // Safety distance between two robots
-//         this->delta_jac = 1e-2;
-//     };
+GeometryFactor::GeometryFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
+    float sigma, const Eigen::VectorXd& measurement) 
+    : Factor{f_id, r_id, variables, sigma, measurement} {
+        factor_type_ = GEOMETRY_FACTOR;
+        this->delta_jac = 1e-2;
+};
+
+
+Eigen::MatrixXd GeometryFactor::h_func_(const Eigen::VectorXd& X) {
+    
+    Eigen::Vector2d pos_current = X.segment(0, 2);
+    Eigen::Vector2d pos_left = X.segment(4, 2);
+    Eigen::Vector2d pos_right = X.segment(6, 2);
+
+    // calculate current distance between the adjacent robots;
+    double dist_left = (pos_current - pos_left).norm();
+    double dist_right = (pos_current - pos_right).norm();
+
+    // calculate the angle between the 2 vectors
+    Eigen::Vector2d vec_to_left = pos_left - pos_current;
+    Eigen::Vector2d vec_to_right = pos_right - pos_current;
+    
+    double norm_left = vec_to_left.norm() + 1e-6;
+    double norm_right = vec_to_right.norm() + 1e-6;
+    double cos_angle = vec_to_left.dot(vec_to_right) / (norm_left * norm_right);
+
+    //clamp cos_angle to [-1, 1] to avoid NaN errors
+    cos_angle = std::max(-1.0, std::min(1.0, cos_angle));
+    double current_angle = acos(cos_angle);
+
+    Eigen::MatrixXd h(3, 1);
+    h(0, 0) = dist_left - desired_length_;
+    h(1, 0) = dist_right - desired_length_;
+    h(2, 0) = current_angle - desired_angle_;
+    
+    return h;
+
+};
 
 InterrobotFactor::InterrobotFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
     float sigma, const Eigen::VectorXd& measurement, 

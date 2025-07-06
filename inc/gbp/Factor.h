@@ -20,7 +20,7 @@ using Eigen::last;
 class Variable;     // Forward declaration
 
 // Types of factors defined. Default is DEFAULT_FACTOR
-enum FactorType {DEFAULT_FACTOR, DYNAMICS_FACTOR, INTERROBOT_FACTOR, OBSTACLE_FACTOR, CONTACT_FACTOR, PAYLOAD_VELOCITY_FACTOR};
+enum FactorType {DEFAULT_FACTOR, DYNAMICS_FACTOR, INTERROBOT_FACTOR, OBSTACLE_FACTOR, CONTACT_FACTOR, PAYLOAD_VELOCITY_FACTOR, GEOMETRY_FACTOR};
 /*****************************************************************************************/
 // Factor used in GBP
 /*****************************************************************************************/
@@ -172,23 +172,20 @@ class DynamicsFactor: public Factor {
 // position at the same timestep (collision). This factor is created between variables of two robots.
 // The factor has 0 energy if the variables are further away than the safety distance. skip_ = true in this case.
 /********************************************************************************************/
-// class PayloadFactor: public Factor {
-//     public:
-//     // Change the parameters below:
-//     std::shared_ptr<Payload> payload_;
-//     Eigen::Vector2d contact_point_;
-//     Eigen::Vector2d contact_normal_;
-//     float max_push_force_;
+class GeometryFactor: public Factor {
+    public:
+    float desired_length_ = 0.5 * sqrt(2) * globals.PAYLOAD_WIDTH;
+    float desired_angle_ = M_PI / 2;
+    int left_rid_;
+    int right_rid_;
 
-//     PayloadFactor(Simulator* sim, int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
-//         float sigma, const Eigen::VectorXd& measurement,
-//         float robot_radius);
+    GeometryFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
+        float sigma, const Eigen::VectorXd& measurement);
     
-//         Eigen::MatrixXd h_func_(const Eigen::VectorXd& X);
-//         Eigen::MatrixXd J_func_(const Eigen::VectorXd& X);
-//         bool skip_factor();
+    Eigen::MatrixXd h_func_(const Eigen::VectorXd& X);
+    // bool skip_factor() override;
 
-// };
+};
 
 class InterrobotFactor: public Factor {
     public:

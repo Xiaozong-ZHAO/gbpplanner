@@ -277,11 +277,6 @@ void Robot::updateCurrent(){
     // Real pose update
     position_ = position_ + increment;
 
-    if (usePhysics_ && physicsBody_){
-        // Update the physics body position to match the logical position
-        syncLogicalToPhysics();
-    }
-
 };
 
 void Robot::syncLogicalToPhysics(){
@@ -345,9 +340,28 @@ void Robot::updateInterrobotFactors(){
     }
 }
 
+void Robot::updateGeometryFactors(){
+    int rid_left = nearby_.at(0);
+    int rid_right = nearby_.at(1);
+    createGeometryFactors(sim_->robots_.at(rid_left), sim_->robots_.at(rid_right));
+}
+
 /***************************************************************************************************/
 // Create inter-robot factors between this robot and another robot
 /***************************************************************************************************/
+void Robot::createGeometryFactors(std::shared_ptr<Robot> neighbour_left, std::shared_ptr<Robot> neighbour_right){
+    for (int i = 1; i < num_variables_; i++){
+        std::vector<std::shared_ptr<Variable>> variables{getVar(i), neighbour_left->getVar(i), neighbour_right->getVar(i)};
+        Eigen::VectorXd z = Eigen::VectorXd::Zero(variables.front()->n_dofs_);
+        auto factor = std::make_shared<GeometryFactor>(sim_->next_fid_++, this->rid_, variables, globals.SIGMA_FACTOR_GEOMETRY, z);
+
+        factor->left_rid_ = neighbour_left->rid_;
+        factor->right_rid_ = neighbour_right->rid_;
+        for (auto var : factor->variables_) var->add_factor(factor);
+        this->factors_[factor->key_] = factor;
+    }
+}
+
 void Robot::createInterrobotFactors(std::shared_ptr<Robot> other_robot)
 {
     // Create Interrobot factors for all timesteps excluding current state

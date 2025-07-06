@@ -47,6 +47,7 @@ public:
     int num_variables_;                         // Number of variables in the planned path (assumed to be the same for all robots)
     std::vector<int> connected_r_ids_{};        // List of robot ids that are currently connected via inter-robot factors to this robot
     std::vector<int> neighbours_{};             // List of robot ids that are within comms radius of this robot
+    std::vector<int> nearby_{};
     Image* p_obstacleImage;                     // Pointer to image representing the obstacles in the environment
     float height_3D_ = 0.f;                     // Height out of plane (for 3d visualisation only)
     Eigen::VectorXd position_;                  // Position of the robot (equivalent to taking the [x,y] of the current state of the robot)
@@ -87,9 +88,11 @@ public:
     // Delete existing inter-robot factors for faraway robots
     /***************************************************************************************************/    
     void updateInterrobotFactors();
+    void updateGeometryFactors();
     void createInterrobotFactors(std::shared_ptr<Robot> other_robot);
-    void deleteInterrobotFactors(std::shared_ptr<Robot> other_robot);  
-
+    void deleteInterrobotFactors(std::shared_ptr<Robot> other_robot);
+    void createGeometryFactors(std::shared_ptr<Robot> neighbour_left, std::shared_ptr<Robot> neighbour_right);  
+    
 
     /***************************************************************************************************/    
     // Drawing function

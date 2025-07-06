@@ -102,15 +102,6 @@ void Simulator::draw(){
                 payload->draw();
             }
 
-            // Draw the points in Simulator::endings_
-            for (const auto& ending : endings_) {
-                DrawSphereEx(Vector3{
-                    static_cast<float>(ending.x()),
-                    0.5f,
-                    static_cast<float>(ending.y())
-                } , 0.2f, 16, 16, RED);
-            }
-
         EndMode3D();
         draw_info(clock_);
     EndDrawing();
@@ -346,7 +337,6 @@ double Simulator::computeDesiredPayloadAngularVelocity(std::shared_ptr<Payload> 
     return desired_angular_velocity;
 }
 
-
 // 修改timestep方法
 void Simulator::timestep() {
     if (globals.SIM_MODE != Timestep) return;
@@ -359,7 +349,6 @@ void Simulator::timestep() {
     } else if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
         // 分布式GBP控制模式
         updateDistributedPayloadControl();
-        std::cout << "Using distributed GBP control" << std::endl;
     } else {
         // 原有的集中式最小二乘控制
         computeLeastSquares();
@@ -417,6 +406,53 @@ void Simulator::updateDistributedPayloadControl() {
 // Use a kd-tree to perform a radius search for neighbours of a robot within comms. range
 // (Updates the neighbours_ of a robot)
 /*******************************************************************************/
+  void Simulator::locateNearbys(std::map<int, std::shared_ptr<Robot>>& robots)
+   {
+      // Clear all nearby lists first
+      for (auto [rid, robot] : robots) {
+          robot->nearby_.clear();
+      }
+
+      // Get all robot positions with their IDs
+      std::vector<std::pair<int, Eigen::Vector2d>> robot_positions;
+      for (auto [rid, robot] : robots) {
+          robot_positions.push_back({rid,
+  Eigen::Vector2d(robot->position_(0), robot->position_(1))});
+      }
+
+      // Sort robots to identify corners of the square
+      // First sort by y-coordinate, then by x-coordinate
+      std::sort(robot_positions.begin(), robot_positions.end(),
+                [](const std::pair<int, Eigen::Vector2d>& a, const
+  std::pair<int, Eigen::Vector2d>& b) {
+                    if (std::abs(a.second.y() - b.second.y()) < 1e-6) {
+                        return a.second.x() < b.second.x();
+                    }
+                    return a.second.y() < b.second.y();
+                });
+      int bottom_left_rid = robot_positions[0].first;
+      int bottom_right_rid = robot_positions[1].first;
+      int top_left_rid = robot_positions[2].first;
+      int top_right_rid = robot_positions[3].first;
+
+      // Set adjacent neighbors for each robot (excluding diagonal)
+      // Bottom-left: adjacent to bottom-right and top-left
+      robots[bottom_left_rid]->nearby_.push_back(bottom_right_rid);
+      robots[bottom_left_rid]->nearby_.push_back(top_left_rid);
+
+      // Bottom-right: adjacent to bottom-left and top-right
+      robots[bottom_right_rid]->nearby_.push_back(bottom_left_rid);
+      robots[bottom_right_rid]->nearby_.push_back(top_right_rid);
+
+      // Top-left: adjacent to bottom-left and top-right
+      robots[top_left_rid]->nearby_.push_back(bottom_left_rid);
+      robots[top_left_rid]->nearby_.push_back(top_right_rid);
+
+      // Top-right: adjacent to bottom-right and top-left
+      robots[top_right_rid]->nearby_.push_back(bottom_right_rid);
+      robots[top_right_rid]->nearby_.push_back(top_left_rid);
+  }
+
 void Simulator::calculateRobotNeighbours(std::map<int,std::shared_ptr<Robot>>& robots){
     for (auto [rid, robot] : robots){
         robot_positions_.at(rid) = std::vector<double>{robot->position_(0), robot->position_(1)};
@@ -572,6 +608,8 @@ void Simulator::createOrDeleteRobots(){
         robot_positions_[robot->rid_] = std::vector<double>{robot->waypoints_[0](0), robot->waypoints_[0](1)};
         robots_[robot->rid_] = robot;
     }
+
+    
     
     // 关键修改：可切换的刚性连接
     if (globals.FORMATION == "Payload" && !payloads_.empty()) {
@@ -596,7 +634,11 @@ void Simulator::createOrDeleteRobots(){
             }
         }
     }
-    
+
+    locateNearbys(robots_);
+    for (auto& [rid, robot]: robots_) {
+        robot->updateGeometryFactors();
+    }
     // Delete robots
     for (auto robot : robots_to_delete){
         deleteRobot(robot);

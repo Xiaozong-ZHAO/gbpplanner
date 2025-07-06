@@ -127,6 +127,7 @@ public:
     // (Updates the neighbours_ of a robot)
     /*******************************************************************************/    
     void calculateRobotNeighbours(std::map<int,std::shared_ptr<Robot>>& robots);
+    void locateNearbys(std::map<int, std::shared_ptr<Robot>>& robots);
 
     /*******************************************************************************/
     // Handles keypresses and mouse input, and updates camera.
