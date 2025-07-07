@@ -354,7 +354,7 @@ void Robot::syncLogicalToPhysics(){
     
     physicsBody_->SetTransform(b2Vec2(position_(0), position_(1)), 0.0f);
     Eigen::VectorXd increment = ((*this)[1]->mu_ - (*this)[0]->mu_) * globals.TIMESTEP / globals.T0;
-    b2Vec2 desiredVel(increment(0) / globals.TIMESTEP, increment(1) / globals.TIMESTEP);
+    b2Vec2 desiredVel(increment(0), increment(1));
     physicsBody_->SetLinearVelocity(desiredVel);
 }
 
