@@ -344,7 +344,9 @@ void Robot::updateCurrent(){
     getVar(0)->change_variable_prior(getVar(0)->mu_ + increment);
     // Real pose update
     position_ = position_ + increment;
-
+    
+    // Update physics body state to match logical state
+    syncLogicalToPhysics();
 };
 
 void Robot::syncLogicalToPhysics(){

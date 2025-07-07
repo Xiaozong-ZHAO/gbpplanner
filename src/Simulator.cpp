@@ -380,6 +380,21 @@ void Simulator::timestep() {
         }
     }
     
+    // Step physics world if it exists
+    if (physicsWorld_) {
+        physicsWorld_->Step(globals.TIMESTEP, 6, 2); // timeStep, velocityIterations, positionIterations
+    }
+    
+    // Sync physics back to logical state for all robots
+    for (auto [r_id, robot] : robots_) {
+        robot->syncPhysicsToLogical();
+    }
+    
+    // Update payload states from physics
+    for (auto& [pid, payload] : payloads_) {
+        payload->update();
+    }
+    
     clock_++;
     if (clock_ >= globals.MAX_TIME) globals.RUN = false;
 }
