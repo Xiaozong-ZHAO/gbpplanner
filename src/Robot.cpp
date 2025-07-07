@@ -199,7 +199,7 @@ void Robot::attachToPayload(std::shared_ptr<Payload> payload, const Eigen::Vecto
     jointDef.referenceAngle = payload->physicsBody_->GetAngle() - physicsBody_->GetAngle();
     
     // 使用正确的参数名
-    jointDef.stiffness = 30000.0f;  // 刚度 (N*m) - 数值越大越"硬"
+    jointDef.stiffness = std::numeric_limits<float>::max();  // 刚度 (N*m) - 数值越大越"硬"
     jointDef.damping = 1000.0f;     // 阻尼 (N*m*s) - 防止震荡
     
     // 创建关节
@@ -320,9 +320,9 @@ void Robot::createPhysicsBody(){
     // Create a fixture definition for the circle shape
     b2FixtureDef fixtureDef;
     fixtureDef.shape = &circleShape;
-    fixtureDef.density = 0.1f;
-    fixtureDef.friction = 0.5f;
-    fixtureDef.restitution = 0.1f;
+    fixtureDef.density = 0.0f;
+    fixtureDef.friction = 0.0f;
+    fixtureDef.restitution = 0.0f;
 
     physicsBody_->CreateFixture(&fixtureDef);
     
