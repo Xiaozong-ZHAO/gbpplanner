@@ -56,7 +56,7 @@ void Payload::createPhysicsBody(float density){
     // Create a fixture definition for the rectangle shape
     b2FixtureDef fixtureDef;
     fixtureDef.shape = &boxShape;
-    fixtureDef.density = 0.0f;
+    fixtureDef.density = density;
     fixtureDef.friction = 0.0f;
     fixtureDef.restitution = 0.0f;
     
