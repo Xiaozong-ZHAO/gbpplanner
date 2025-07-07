@@ -32,3 +32,4 @@ When showing the workflow of the code, please use mathematical notation rather t
 Currently, our target is to make all robots moves like one point on a rigid body. otherwise the robot velocities may oppose each other, then when we attach robots to the payload, thay cannot move the payload to the target point.
 
 Currently, only dynamics factor, interrobot factor, obstacle factors are using. Please ignore other factors.
+
