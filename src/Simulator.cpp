@@ -159,28 +159,6 @@ std::pair<Eigen::Vector2d, Eigen::Vector2d> Simulator::getContactPoint(int robot
     return {Eigen::Vector2d::Zero(), Eigen::Vector2d::Zero()};
 }
 
-Eigen::VectorXd Simulator::solveConstrainedLeastSquares(const Eigen::MatrixXd &G, const Eigen::Vector3d& w_cmd) {
-    // 检查是否有接触的机器人
-    if (G.cols() == 0) {
-        return Eigen::VectorXd::Zero(0);
-    }
-    
-    // 使用SVD求解（最稳定）
-    Eigen::VectorXd f = G.bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(w_cmd);
-    
-    // 简单处理非负约束
-    for (int i = 0; i < f.size(); i++) {
-        f(i) = std::max(0.0, f(i));
-    }
-    
-    // 调试输出
-    std::cout << "G matrix (3x" << G.cols() << "):\n" << G << std::endl;
-    std::cout << "w_cmd: " << w_cmd.transpose() << std::endl;
-    std::cout << "Solved f: " << f.transpose() << std::endl;
-    std::cout << "Residual: " << (G * f - w_cmd).norm() << std::endl;
-    
-    return f;
-}
 
 Eigen::MatrixXd Simulator::Quat2Rot(Eigen::Quaterniond q) {
     Eigen::MatrixXd R(2, 2);
@@ -191,193 +169,38 @@ Eigen::MatrixXd Simulator::Quat2Rot(Eigen::Quaterniond q) {
     return R;
 }
 
-void Simulator::computeLeastSquares(){
-    for (auto& [pid, payload]: payloads_){
-        // 计算期望速度和角速度
-        Eigen::Vector2d dist_to_target = payload->target_position_ - payload->position_;
-        Eigen::Vector2d desired_velocity = dist_to_target.normalized() * 
-            std::min(static_cast<double>(globals.MAX_SPEED), dist_to_target.norm());
-
-        Eigen::Quaterniond relative_rotation = payload->target_orientation_ * payload->current_orientation_.inverse();
-
-        double rotation_error = 2.0 * std::acos(std::abs(relative_rotation.w()));
-        double rotation_direction = (relative_rotation.z() >= 0) ? 1.0 : -1.0;
-        double signed_rotation_error = rotation_direction * rotation_error;
-
-        double desired_angular_velocity = std::copysign(1.0, signed_rotation_error) * 
-            std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED), std::abs(signed_rotation_error));
-        
-        // 获取当前状态
-        Eigen::Vector2d current_velocity = payload->getVelocity();
-        double current_angular_velocity = payload->getAngularVelocity();
-
-        // 计算所需的力和力矩
-        double dt = globals.TIMESTEP;
-        double mass = payload->getMass();
-        double inertia = payload->getMomentOfInertia();
-
-        Eigen::Vector2d required_force = (mass * (desired_velocity - current_velocity)) / dt;
-        double required_torque = (inertia * (desired_angular_velocity - current_angular_velocity)) / dt;
-        
-        // 使用固定的接触点和法向量
-        auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
-        
-        // 构建G矩阵
-        int num_contact_points = contact_points.size();
-        if (num_contact_points == 0) continue; // 没有接触点，跳过
-        
-        Eigen::MatrixXd G(3, num_contact_points);
-        Eigen::Vector2d payload_center = payload->getPosition();
-        
-        for (int i = 0; i < num_contact_points; i++){
-            G(0, i) = contact_normals[i].x();
-            G(1, i) = contact_normals[i].y();
-
-            Eigen::Vector2d r = contact_points[i] - payload_center;
-            double torque_contribution = r.x() * contact_normals[i].y() - r.y() * contact_normals[i].x();
-            G(2, i) = torque_contribution;
-        }
-
-        // 构建命令向量
-        Eigen::Vector3d w_cmd;
-        w_cmd << required_force.x(), required_force.y(), required_torque;
-        
-        // 求解最小二乘问题
-        Eigen::VectorXd f = solveConstrainedLeastSquares(G, w_cmd);
-        
-        // 直接将计算出的力施加到payload上
-        applyForcesToPayload(payload, f, contact_points, contact_normals);
-        std::cout << "Solved forces: " << f.transpose() << std::endl;
-    }
-}
-
-void Simulator::applyForcesToPayload(std::shared_ptr<Payload> payload, 
-                                   const Eigen::VectorXd& forces,
-                                   const std::vector<Eigen::Vector2d>& contact_points,
-                                   const std::vector<Eigen::Vector2d>& contact_normals) {
-    if (!payload->physicsBody_) return;
-    
-    // 遍历所有接触点，施加对应的力
-    for (int i = 0; i < forces.size() && i < contact_points.size(); i++) {
-        if (forces(i) > 0.01) { // 只施加显著的力
-            // 计算力向量
-            Eigen::Vector2d force_vector = forces(i) * contact_normals[i];
-            
-            // 转换为Box2D格式
-            b2Vec2 force_b2(force_vector.x(), force_vector.y());
-            b2Vec2 point_b2(contact_points[i].x(), contact_points[i].y());
-            
-            // 施加力到指定点
-            payload->physicsBody_->ApplyForce(force_b2, point_b2, true);
-        }
-    }
-}
 
 
-void Simulator::applyDirectPayloadVelocityControl() {
-    for (auto& [pid, payload] : payloads_) {
-        if (!payload->physicsBody_) continue;
-        
-        // 计算期望的线速度和角速度
-        Eigen::Vector2d desired_velocity = computeDesiredPayloadVelocity(payload);
-        double desired_angular_velocity = computeDesiredPayloadAngularVelocity(payload);
-        
-        // 直接设置payload的速度（Box2D提供的功能）
-        b2Vec2 new_linear_velocity(desired_velocity.x(), desired_velocity.y());
-        payload->physicsBody_->SetLinearVelocity(new_linear_velocity);
-        payload->physicsBody_->SetAngularVelocity(desired_angular_velocity);
-        
-        // 调试输出
-        static int debug_counter = 0;
-        if (debug_counter++ % 60 == 0) {  // 每60帧输出一次
-            b2Vec2 current_velocity = payload->physicsBody_->GetLinearVelocity();
-            double current_angular_velocity = payload->physicsBody_->GetAngularVelocity();
-            
-            std::cout << "Direct velocity control - Set vel: (" << desired_velocity.x() << ", " << desired_velocity.y() 
-                      << "), Actual vel: (" << current_velocity.x << ", " << current_velocity.y << ")" << std::endl;
-            std::cout << "Angular - Set: " << desired_angular_velocity 
-                      << ", Actual: " << current_angular_velocity << std::endl;
-        }
-    }
-}
 
-Eigen::Vector2d Simulator::computeDesiredPayloadVelocity(std::shared_ptr<Payload> payload) {
-    // 与PayloadVelocityFactor::computeDesiredPayloadMotion()保持一致的线速度计算
-    Eigen::Vector2d payload_to_target = payload->target_position_ - payload->position_;
-    
-    if (payload_to_target.norm() <= 0.1) {
-        return Eigen::Vector2d::Zero();  // 与factor中的阈值保持一致
-    }
-    
-    // 完全复制factor中的逻辑
-    Eigen::Vector2d desired_velocity = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
-    
-    return desired_velocity;
-}
 
-double Simulator::computeDesiredPayloadAngularVelocity(std::shared_ptr<Payload> payload) {
-    // 与PayloadVelocityFactor::computeDesiredPayloadMotion()保持一致的角速度计算
-    double rotation_error = payload->getRotationError();
-    
-    if (std::abs(rotation_error) <= 0.01) {  // 与factor中的阈值保持一致
-        return 0.0;
-    }
-    
-    // 完全复制factor中的逻辑
-    double desired_angular_velocity = std::copysign(1.0, rotation_error) * 
-        std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), std::abs(rotation_error));
-    
-    // 添加相同的调试输出
-    static int debug_counter = 0;
-    if (debug_counter++ % 60 == 0) {
-        std::cout << "Direct control - Rotation error: " << rotation_error 
-                  << " rad, desired angular vel: " << desired_angular_velocity << std::endl;
-    }
-    
-    return desired_angular_velocity;
-}
 
-// 修改timestep方法
+
+// Distributed GBP control only
 void Simulator::timestep() {
     if (globals.SIM_MODE != Timestep) return;
     
-    // 根据配置选择控制方法
-    if (globals.USE_DIRECT_PAYLOAD_VELOCITY) {
-        // 直接速度控制模式
-        applyDirectPayloadVelocityControl();
-        std::cout << "Using direct payload velocity control" << std::endl;
-    } else if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL) {
-        // 分布式GBP控制模式
-        updateDistributedPayloadControl();
-    } else {
-        // 原有的集中式最小二乘控制
-        computeLeastSquares();
-        std::cout << "Using centralized least squares control" << std::endl;
-    }
+    // Use distributed GBP control
+    updateDistributedPayloadControl();
     
     calculateRobotNeighbours(robots_);
     
-    // 更新因子（只在GBP模式下需要）
-    if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
-        for (auto [r_id, robot] : robots_) {
-            robot->updateInterrobotFactors();
-        }
+    // Update interrobot factors
+    for (auto [r_id, robot] : robots_) {
+        robot->updateInterrobotFactors();
     }
     
     setCommsFailure(globals.COMMS_FAILURE_RATE);
     
-    // GBP迭代（只在GBP模式下需要）
-    if (globals.USE_DISTRIBUTED_PAYLOAD_CONTROL && !globals.USE_DIRECT_PAYLOAD_VELOCITY) {
-        for (int i = 0; i < globals.NUM_ITERS; i++) {
-            iterateGBP(1, INTERNAL, robots_);
-            iterateGBP(1, EXTERNAL, robots_);
-        }
-        
-        // 更新机器人状态
-        for (auto [r_id, robot] : robots_) {
-            robot->updateHorizon();
-            robot->updateCurrent();
-        }
+    // GBP iterations
+    for (int i = 0; i < globals.NUM_ITERS; i++) {
+        iterateGBP(1, INTERNAL, robots_);
+        iterateGBP(1, EXTERNAL, robots_);
+    }
+    
+    // Update robot states
+    for (auto [r_id, robot] : robots_) {
+        robot->updateHorizon();
+        robot->updateCurrent();
     }
     
     // Step physics world if it exists
@@ -409,11 +232,6 @@ void Simulator::updateDistributedPayloadControl() {
                 connected_robots++;
             }
         }
-        
-        // if (connected_robots > 0) {
-        //     std::cout << "Payload " << pid << " has " << connected_robots 
-        //               << " robots connected via factors" << std::endl;
-        // }
     }
 }
 

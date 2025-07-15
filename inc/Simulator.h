@@ -66,11 +66,6 @@ public:
     std::pair<Eigen::Vector2d, Eigen::Vector2d> getContactPoint(int robot_id, int payload_id);
     bool isRobotContactingPayload(int robot_id, int payload_id);
     b2World* physicsWorld_ = nullptr;
-    void computeLeastSquares();
-    void applyForcesToPayload(std::shared_ptr<Payload> payload, 
-                                   const Eigen::VectorXd& forces,
-                                   const std::vector<Eigen::Vector2d>& contact_points,
-                                   const std::vector<Eigen::Vector2d>& contact_normals);
 
 
     b2World* getPhysicsWorld(){
@@ -98,11 +93,7 @@ public:
     void deletePayload(int payload_id);
     std::vector<Eigen::Vector2d> getFixedContactPoints(std::shared_ptr<Payload> payload);
     std::vector<Eigen::Vector2d> getFixedContactNormals(std::shared_ptr<Payload> payload);
-    Eigen::VectorXd solveConstrainedLeastSquares(const Eigen::MatrixXd &G, const Eigen::Vector3d& w_cmd);
     std::shared_ptr<Payload> getPayload(int payload_id);
-    void applyDirectPayloadVelocityControl();
-    Eigen::Vector2d computeDesiredPayloadVelocity(std::shared_ptr<Payload> payload);
-    double computeDesiredPayloadAngularVelocity(std::shared_ptr<Payload> payload);
     Eigen::MatrixXd Quat2Rot(Eigen::Quaterniond q);
 
     /*******************************************************************************/
