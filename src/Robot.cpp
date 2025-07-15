@@ -346,6 +346,8 @@ void Robot::updateCurrent(){
     position_ = position_ + increment;
     
     // // Update physics body state to match logical state
+    // print the position_(2) and position_(3) values
+    std::cout << "Robot " << rid_ << " velocity: (" << position_(2) << ", " << position_(3) << ")" << std::endl;
     syncLogicalToPhysics();
 };
 

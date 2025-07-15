@@ -14,21 +14,22 @@ from create_distance_field import *
 OBSTACLE_COLOR = (0,0,0)
 img = 255*np.ones((1000, 1000, 3), dtype = np.uint8)
 
-# Create Obstacle shapes
-triangles = [[(380, 410), (355, 423), (410, 454)],
-             [(527, 492), (527, 540), (602, 510)]]
-for t in triangles:
-    cv2.fillPoly(img, np.array([t]), OBSTACLE_COLOR)
+# # Create Obstacle shapes
+# triangles = [[(380, 410), (355, 423), (410, 454)],
+#              [(527, 492), (527, 540), (602, 510)]]
+# for t in triangles:
+#     cv2.fillPoly(img, np.array([t]), OBSTACLE_COLOR)
 
-rectangles = [[(573, 366), (603, 426)],
-             [(420, 550), (460, 590)],
-             [(600,575), (650,625)],
-             [(468, 412), (498, 442)]]
+# rectangles = [[(573, 366), (603, 426)],
+#              [(420, 550), (460, 590)],
+#              [(600,575), (650,625)],
+#              [(468, 412), (498, 442)]]
+rectangles = [[(600, 600), (750, 750)]]
 for r in rectangles:
     cv2.rectangle(img, r[0], r[1], OBSTACLE_COLOR, -1)
 
 # Create distance field
 blur = create_distance_field(img)
 
-# # save output
-# cv2.imwrite('circle_cluttered.png', 255 * blur)
+# save output
+cv2.imwrite('test.png', 255 * blur)
