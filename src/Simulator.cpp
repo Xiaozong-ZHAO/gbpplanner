@@ -232,6 +232,7 @@ void Simulator::updateDistributedPayloadControl() {
                 connected_robots++;
             }
         }
+        std::cout << "Payload " << pid << " has " << connected_robots << " connected robots." << std::endl;
     }
 }
 
@@ -456,14 +457,7 @@ void Simulator::createOrDeleteRobots(){
                 if (contact_index < contact_points.size()) {
                     Eigen::Vector2d attach_point = contact_points[contact_index];
                     robot->attachToPayload(payload, attach_point);
-                    std::cout << "Robot " << robot->rid_ << " attached to payload via Box2D joint (rigid attachment enabled)" << std::endl;
                 }
-            }
-        } else {
-            // 禁用刚性连接，使用纯因子图控制
-            std::cout << "Rigid attachment disabled - robots will rely purely on factor-based control" << std::endl;
-            for (auto robot : robots_to_create) {
-                std::cout << "Robot " << robot->rid_ << " will use factor-based control only" << std::endl;
             }
         }
     }

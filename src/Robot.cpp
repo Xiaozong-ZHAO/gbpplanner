@@ -204,9 +204,6 @@ void Robot::attachToPayload(std::shared_ptr<Payload> payload, const Eigen::Vecto
     
     // 创建关节
     payload_joint_ = (b2WeldJoint*)physicsWorld_->CreateJoint(&jointDef);
-    
-    std::cout << "Robot " << rid_ << " attached to payload at (" 
-              << attach_point.x() << ", " << attach_point.y() << ")" << std::endl;
 }
 
 void Robot::detachFromPayload() {
@@ -347,17 +344,17 @@ void Robot::updateCurrent(){
     
     // // Update physics body state to match logical state
     // print the position_(2) and position_(3) values
-    std::cout << "Robot " << rid_ << " velocity: (" << position_(2) << ", " << position_(3) << ")" << std::endl;
     syncLogicalToPhysics();
 };
 
 void Robot::syncLogicalToPhysics(){
     if (!usePhysics_ || !physicsBody_) return;
     
-    physicsBody_->SetTransform(b2Vec2(position_(0), position_(1)), 0.0f);
+    // physicsBody_->SetTransform(b2Vec2(position_(0), position_(1)), 0.0f);
     Eigen::VectorXd increment = ((*this)[1]->mu_ - (*this)[0]->mu_) * globals.TIMESTEP / globals.T0;
-    b2Vec2 desiredVel(increment(0), increment(1));
-    // physicsBody_->SetLinearVelocity(desiredVel);
+    b2Vec2 desiredVel(getVar(0)->mu_(2), getVar(0)->mu_(3));
+
+    physicsBody_->SetLinearVelocity(desiredVel);
 }
 
 void Robot::syncPhysicsToLogical(){
