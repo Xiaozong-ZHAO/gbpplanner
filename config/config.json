@@ -22,6 +22,7 @@
   "COMMS_FAILURE_RATE": 0,
   "FORMATION": "Payload",
   "OBSTACLE_FILE": "",
+  "OBSTACLE_CONFIG_FILE": "../config/obstacles.json",
 
   "###": "GBP parameters",
   "SIGMA_FACTOR_DYNAMICS": 0.1,
@@ -50,7 +51,7 @@
   "CONTACT_ASSIGNMENT_RADIUS": 5.0,
 
   "TARGET_RELATIVE_X": 30.0,
-  "TARGET_RELATIVE_Y": 30.0,
+  "TARGET_RELATIVE_Y": 0.0,
   "TARGET_RELATIVE_ROTATION": 0.7
 
 

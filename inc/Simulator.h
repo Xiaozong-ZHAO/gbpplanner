@@ -27,6 +27,13 @@ class Graphics;
 class TreeOfRobots;
 class Payload;
 
+// Simple obstacle structure
+struct ObstacleData {
+    int id;
+    Eigen::Vector2d position;
+    float radius;
+};
+
 /************************************************************************************/
 // The main Simulator. This is where the magic happens.
 /************************************************************************************/
@@ -52,6 +59,9 @@ public:
     // Image representing the obstacles in the environment
     std::vector<Eigen::Vector2d> endings_;
     Image obstacleImg;
+    
+    // Obstacle data loaded from JSON
+    std::vector<ObstacleData> obstacles_;
 
     int next_rid_ = 0;                              // New robots will use this rid. It should be ++ incremented when this happens
     int next_vid_ = 0;                              // New variables will use this vid. It should be ++ incremented when this happens
@@ -95,6 +105,10 @@ public:
     std::vector<Eigen::Vector2d> getFixedContactNormals(std::shared_ptr<Payload> payload);
     std::shared_ptr<Payload> getPayload(int payload_id);
     Eigen::MatrixXd Quat2Rot(Eigen::Quaterniond q);
+    
+    // Obstacle management functions
+    void loadObstacles();
+    void drawObstacles();
 
     /*******************************************************************************/
     // Set a proportion of robots to not perform inter-robot communications

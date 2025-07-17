@@ -36,3 +36,6 @@ debug/
 
 # Python
 __pycache__/
+
+# Belief propagation assets folder
+assets/belief_propagation/

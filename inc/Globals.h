@@ -27,6 +27,7 @@ class Globals {
     bool RUN = true;
     std::string CONFIG_FILE = "../config/config.json";      // Default config file
     std::string OBSTACLE_FILE;                              // Binary image for obstacles
+    std::string OBSTACLE_CONFIG_FILE;                       // JSON file for obstacle configuration
     std::string ASSETS_DIR;                                 // Directory for Assets
     int N_DOFS = 4;                                         // Degrees of freedom (x, y, xdot, ydot)
     MODES_LIST SIM_MODE = Timestep;                         // Simulation mode to begin with

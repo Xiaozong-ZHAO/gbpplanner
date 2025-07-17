@@ -3,6 +3,7 @@
 // This code is licensed (see LICENSE for details)
 /**************************************************************************************/
 #include <iostream>
+#include <fstream>
 #include <gbp/GBPCore.h>
 #include <Simulator.h>
 #include <Graphics.h>
@@ -10,6 +11,7 @@
 #include <Payload.h>
 #include <nanoflann.h>
 #include "box2d/box2d.h"
+#include "json.hpp"
 
 
 /*******************************************************************************/
@@ -36,6 +38,9 @@ Simulator::Simulator(){
 
 
     createPayload(Eigen::Vector2d(0., 0.), globals.PAYLOAD_WIDTH, globals.PAYLOAD_HEIGHT);
+    
+    // Load obstacles from JSON file
+    loadObstacles();
     
 };
 
@@ -101,6 +106,9 @@ void Simulator::draw(){
             for (auto [pid, payload]: payloads_) {
                 payload->draw();
             }
+            
+            // Draw Obstacles
+            drawObstacles();
 
         EndMode3D();
         draw_info(clock_);
@@ -492,4 +500,69 @@ void Simulator::deletePayload(int payload_id) {
 std::shared_ptr<Payload> Simulator::getPayload(int payload_id) {
     auto it = payloads_.find(payload_id);
     return (it != payloads_.end()) ? it->second : nullptr;
+}
+
+/*******************************************************************************/
+// Load obstacles from JSON configuration file
+/*******************************************************************************/
+void Simulator::loadObstacles() {
+    std::cout << "Loading obstacles from: " << globals.OBSTACLE_CONFIG_FILE << std::endl;
+    
+    if (globals.OBSTACLE_CONFIG_FILE.empty()) {
+        std::cout << "No obstacle configuration file specified." << std::endl;
+        return;
+    }
+    
+    std::ifstream file(globals.OBSTACLE_CONFIG_FILE);
+    if (!file.is_open()) {
+        std::cout << "Warning: Could not open obstacle configuration file: " << globals.OBSTACLE_CONFIG_FILE << std::endl;
+        return;
+    }
+    
+    nlohmann::json json_data;
+    try {
+        file >> json_data;
+        
+        if (json_data.contains("obstacles")) {
+            for (const auto& obstacle_json : json_data["obstacles"]) {
+                ObstacleData obstacle;
+                obstacle.id = obstacle_json["id"];
+                obstacle.position = Eigen::Vector2d(obstacle_json["position"]["x"], obstacle_json["position"]["y"]);
+                obstacle.radius = obstacle_json["radius"];
+                
+                obstacles_.push_back(obstacle);
+                std::cout << "Loaded obstacle " << obstacle.id << " at position (" 
+                          << obstacle.position.x() << ", " << obstacle.position.y() 
+                          << ") with radius " << obstacle.radius << std::endl;
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cout << "Error parsing obstacle configuration file: " << e.what() << std::endl;
+    }
+}
+
+/*******************************************************************************/
+// Draw all obstacles as cylinders
+/*******************************************************************************/
+void Simulator::drawObstacles() {
+    if (!globals.DISPLAY) return;
+    
+    static bool debug_printed = false;
+    if (!debug_printed) {
+        std::cout << "Drawing " << obstacles_.size() << " obstacles" << std::endl;
+        debug_printed = true;
+    }
+    
+    for (const auto& obstacle : obstacles_) {
+        float x = static_cast<float>(obstacle.position.x());
+        float y = static_cast<float>(obstacle.position.y());
+        float radius = obstacle.radius;
+        float height = 8.0f; // Make obstacles taller for better visibility
+        
+        Vector3 position3D = {x, height / 2.0f, y};
+        
+        // Draw cylinder for obstacle with bright red color for visibility
+        DrawCylinder(position3D, radius, radius, height, 16, RED);
+        DrawCylinderWires(position3D, radius, radius, height, 16, BLACK);
+    }
 }

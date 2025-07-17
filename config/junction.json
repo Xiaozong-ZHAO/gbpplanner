@@ -21,7 +21,7 @@
   "MAX_SPEED": 2,
   "COMMS_FAILURE_RATE": 0,
   "FORMATION": "junction",
-  "OBSTACLE_FILE": "../assets/imgs/junction.png",
+  "OBSTACLE_FILE": "",
 
   "###": "GBP parameters",
   "SIGMA_FACTOR_DYNAMICS": 0.1,

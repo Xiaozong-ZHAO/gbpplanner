@@ -36,6 +36,7 @@ void Globals::parse_global_args(std::ifstream& config_file){
     COMMS_FAILURE_RATE = j["COMMS_FAILURE_RATE"];
     FORMATION = j["FORMATION"];
     OBSTACLE_FILE = j["OBSTACLE_FILE"];
+    OBSTACLE_CONFIG_FILE = j["OBSTACLE_CONFIG_FILE"];
 
     // GBP parameters
     SIGMA_FACTOR_DYNAMICS = j["SIGMA_FACTOR_DYNAMICS"];
