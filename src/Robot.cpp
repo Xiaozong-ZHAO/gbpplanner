@@ -215,75 +215,13 @@ void Robot::detachFromPayload() {
 }
 
 void Robot::createPayloadFactors(std::shared_ptr<Payload> payload) {
-    int pid = payload->payload_id_;
-    
-    // 直接使用getContactPointsAndNormals获取接触点和法向量
-    auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();    
-    // 使用分配的接触点
-    Eigen::Vector2d target_contact_point = contact_points[assigned_contact_point_index_];
-    Eigen::Vector2d contact_normal = contact_normals[assigned_contact_point_index_];
-    
-    // 为除了当前状态外的所有变量创建payload因子
-    for (int i = 1; i < num_variables_; i++) {
-        std::vector<std::shared_ptr<Variable>> variables{getVar(i)};
-        
-        // 创建接触保持因子
-        auto contact_factor = std::make_shared<ContactFactor>(
-            sim_->next_fid_++, rid_, variables,
-            globals.SIGMA_FACTOR_CONTACT,
-            Eigen::VectorXd::Zero(1),
-            payload, target_contact_point, sim_
-        );
-        
-        // 创建速度对齐因子
-        auto velocity_factor = std::make_shared<PayloadVelocityFactor>(
-            sim_->next_fid_++, rid_, variables,
-            globals.SIGMA_FACTOR_PAYLOAD_VELOCITY,
-            Eigen::VectorXd::Zero(2),
-            payload, contact_normal
-        );
-        
-        // 添加到变量的因子列表
-        for (auto var : contact_factor->variables_) var->add_factor(contact_factor);
-        for (auto var : velocity_factor->variables_) var->add_factor(velocity_factor);
-        
-        // 添加到robot的factors_映射
-        this->factors_[contact_factor->key_] = contact_factor;
-        this->factors_[velocity_factor->key_] = velocity_factor;
-    }
-    
+    // Payload factors removed - only dynamics, interrobot, and obstacle factors are used
     // 添加到connected payloads列表
     this->connected_payload_ids_.push_back(payload->payload_id_);
 }
 
 void Robot::deletePayloadFactors(std::shared_ptr<Payload> payload) {
-    std::vector<Key> factors_to_delete{};
-    
-    // 查找所有与此payload相关的因子
-    for (auto& [f_key, fac] : this->factors_) {
-        if (fac->factor_type_ == CONTACT_FACTOR) {
-            if (auto contact_fac = std::dynamic_pointer_cast<ContactFactor>(fac)) {
-                if (contact_fac->getPayloadId() == payload->payload_id_) {
-                    factors_to_delete.push_back(f_key);
-                }
-            }
-        } else if (fac->factor_type_ == PAYLOAD_VELOCITY_FACTOR) {
-            if (auto velocity_fac = std::dynamic_pointer_cast<PayloadVelocityFactor>(fac)) {
-                if (velocity_fac->getPayloadId() == payload->payload_id_) {
-                    factors_to_delete.push_back(f_key);
-                }
-            }
-        }
-    }
-    
-    // 删除因子
-    for (auto f_key : factors_to_delete) {
-        auto fac = this->factors_[f_key];
-        for (auto& var : fac->variables_) {
-            var->delete_factor(f_key);
-        }
-        this->factors_.erase(f_key);
-    }
+    // Payload factors removed - only dynamics, interrobot, and obstacle factors are used
 }
 
 bool Robot::isConnectedToPayload(int payload_id) const {
@@ -410,25 +348,14 @@ void Robot::updateInterrobotFactors(){
 }
 
 void Robot::updateGeometryFactors(){
-    int rid_left = nearby_.at(0);
-    int rid_right = nearby_.at(1);
-    createGeometryFactors(sim_->robots_.at(rid_left), sim_->robots_.at(rid_right));
+    // Geometry factors removed - only dynamics, interrobot, and obstacle factors are used
 }
 
 /***************************************************************************************************/
 // Create inter-robot factors between this robot and another robot
 /***************************************************************************************************/
 void Robot::createGeometryFactors(std::shared_ptr<Robot> neighbour_left, std::shared_ptr<Robot> neighbour_right){
-    for (int i = 1; i < num_variables_; i++){
-        std::vector<std::shared_ptr<Variable>> variables{getVar(i), neighbour_left->getVar(i), neighbour_right->getVar(i)};
-        Eigen::VectorXd z = Eigen::VectorXd::Zero(variables.front()->n_dofs_);
-        auto factor = std::make_shared<GeometryFactor>(sim_->next_fid_++, this->rid_, variables, globals.SIGMA_FACTOR_GEOMETRY, z);
-
-        factor->left_rid_ = neighbour_left->rid_;
-        factor->right_rid_ = neighbour_right->rid_;
-        for (auto var : factor->variables_) var->add_factor(factor);
-        this->factors_[factor->key_] = factor;
-    }
+    // Geometry factors removed - only dynamics, interrobot, and obstacle factors are used
 }
 
 void Robot::createInterrobotFactors(std::shared_ptr<Robot> other_robot)

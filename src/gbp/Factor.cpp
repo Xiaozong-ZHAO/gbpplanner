@@ -188,168 +188,7 @@ Message Factor::marginalise_factor_dist(const Eigen::VectorXd &eta, const Eigen:
 // You may create a new factor_type_, in the enum in Factor.h (optional, default type is DEFAULT_FACTOR)
 // Create a measurement function h_func_() and optionally Jacobian J_func_().
 
-// 在文件末尾添加ContactFactor实现
-ContactFactor::ContactFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
-                             float sigma, const Eigen::VectorXd& measurement,
-                             std::shared_ptr<Payload> payload,
-                             Eigen::Vector2d target_contact_point,
-                             Simulator* sim)
-    : Factor{f_id, r_id, variables, sigma, measurement},
-      payload_(payload), target_contact_point_(target_contact_point), sim_(sim) {
-    factor_type_ = CONTACT_FACTOR;
-    this->delta_jac = 1e-3;
-}
 
-Eigen::MatrixXd ContactFactor::h_func_(const Eigen::VectorXd& X) {
-    Eigen::Vector2d robot_pos = X.head(2);
-    double contact_error = computeContactError(robot_pos);
-    
-    Eigen::MatrixXd h(1, 1);
-    h(0, 0) = contact_error;
-    return h;
-}
-
-double ContactFactor::computeContactError(const Eigen::Vector2d& robot_pos) {
-    Eigen::Vector2d world_target_contact = payloadToWorld(target_contact_point_);
-    double distance_to_target = (robot_pos - world_target_contact).norm();
-    return distance_to_target - globals.ROBOT_RADIUS;
-}
-
-Eigen::Vector2d ContactFactor::payloadToWorld(const Eigen::Vector2d& local_point) {
-    Eigen::Vector2d payload_pos = payload_->getPosition();
-    double rotation = payload_->rotation_;
-    
-    Eigen::Matrix2d rot;
-    rot << cos(rotation), -sin(rotation),
-           sin(rotation),  cos(rotation);
-    
-    return payload_pos + rot * local_point;
-}
-
-bool ContactFactor::skip_factor() {
-    return false; // 与dynamics factor生命周期一致
-}
-
-void ContactFactor::draw() {
-    if (globals.DRAW_PATH) {
-        Eigen::Vector2d world_target = payloadToWorld(target_contact_point_);
-        Vector3 target_pos = {(float)world_target.x(), 1.0f, (float)world_target.y()};
-        DrawSphere(target_pos, 0.3f, PURPLE);
-        
-        if (!variables_.empty() && variables_[0]->valid_) {
-            Vector3 robot_pos = {(float)variables_[0]->mu_(0), 1.0f, (float)variables_[0]->mu_(1)};
-            double error = computeContactError(variables_[0]->mu_.head(2));
-            Color line_color = (abs(error) < 0.1) ? GREEN : RED;
-            DrawLine3D(robot_pos, target_pos, line_color);
-        }
-    }
-}
-
-// PayloadVelocityFactor实现
-PayloadVelocityFactor::PayloadVelocityFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
-                                             float sigma, const Eigen::VectorXd& measurement,
-                                             std::shared_ptr<Payload> payload,
-                                             Eigen::Vector2d contact_normal)
-    : Factor{f_id, r_id, variables, sigma, measurement},
-      payload_(payload), contact_normal_(contact_normal) {
-    factor_type_ = PAYLOAD_VELOCITY_FACTOR;
-    this->delta_jac = 1e-3;
-}
-
-Eigen::MatrixXd PayloadVelocityFactor::h_func_(const Eigen::VectorXd& X) {
-    Eigen::Vector2d robot_pos = X.head(2);
-    Eigen::Vector2d robot_velocity = X.tail(2);
-    
-    auto [desired_linear_vel, desired_angular_vel] = computeDesiredPayloadMotion();
-    auto [linear_contribution, angular_contribution] = computeRobotContribution(robot_pos, robot_velocity);
-    
-    Eigen::MatrixXd h(2, 1);
-    h(0, 0) = linear_contribution - desired_linear_vel;
-    h(1, 0) = angular_contribution - desired_angular_vel;
-    
-    return h;
-}
-
-// std::pair<double, double> PayloadVelocityFactor::computeDesiredPayloadMotion() {
-//     if (!payload_) return {0.0, 0.0};
-    
-//     // 线速度分量
-//     Eigen::Vector2d payload_to_target = payload_->target_position_ - payload_->position_;
-//     double desired_linear_velocity_component = 0.0;
-    
-//     if (payload_to_target.norm() > 0.1) {
-//         Eigen::Vector2d desired_velocity = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
-//         desired_linear_velocity_component = desired_velocity.dot(contact_normal_);
-//     }
-    
-//     // 角速度（如果有目标朝向）
-//     double desired_angular_velocity = 0.0;
-//     // 这里可以根据需要添加旋转控制逻辑
-    
-//     return {desired_linear_velocity_component, desired_angular_velocity};
-// }
-
-std::pair<double, double> PayloadVelocityFactor::computeDesiredPayloadMotion() {
-    if (!payload_) return {0.0, 0.0};
-    
-    // 线速度分量（保持现有逻辑）
-    Eigen::Vector2d payload_to_target = payload_->target_position_ - payload_->position_;
-    double desired_linear_velocity_component = 0.0;
-    
-    if (payload_to_target.norm() > 0.1) {
-        Eigen::Vector2d desired_velocity = payload_to_target.normalized() * globals.MAX_SPEED * 0.5;
-        desired_linear_velocity_component = desired_velocity.dot(contact_normal_);
-    }
-    
-    // 角速度（使用修复后的旋转误差计算）
-    double desired_angular_velocity = 0.0;
-    double rotation_error = payload_->getRotationError();
-    
-    if (std::abs(rotation_error) > 0.01) {  // 只有当旋转误差显著时才施加角速度
-        desired_angular_velocity = std::copysign(1.0, rotation_error) * 
-            std::min(static_cast<double>(globals.MAX_ANGULAR_SPEED * 0.5), std::abs(rotation_error));
-        
-        // 调试输出
-        static int debug_counter = 0;
-        if (debug_counter++ % 60 == 0) {
-            std::cout << "Rotation error: " << rotation_error << " rad, desired angular vel: " 
-                      << desired_angular_velocity << std::endl;
-        }
-    }
-    
-    return {desired_linear_velocity_component, desired_angular_velocity};
-}
-
-std::pair<double, double> PayloadVelocityFactor::computeRobotContribution(
-    const Eigen::Vector2d& robot_pos, const Eigen::Vector2d& robot_velocity) {
-    
-    double linear_contribution = robot_velocity.dot(contact_normal_);
-    double angular_contribution = 0.0;
-    
-    if (payload_) {
-        Eigen::Vector2d payload_center = payload_->getPosition();
-        Eigen::Vector2d contact_point = robot_pos - globals.ROBOT_RADIUS * contact_normal_;
-        Eigen::Vector2d r = contact_point - payload_center;
-        
-        double torque_arm = std::abs(r.x() * contact_normal_.y() - r.y() * contact_normal_.x());
-        angular_contribution = torque_arm * linear_contribution;
-        
-        double payload_inertia_approx = payload_->getMomentOfInertia();
-        if (payload_inertia_approx > 1e-6) {
-            angular_contribution /= payload_inertia_approx;
-        }
-    }
-    
-    return {linear_contribution, angular_contribution};
-}
-
-bool PayloadVelocityFactor::skip_factor() {
-    if (payload_) {
-        double distance_to_target = (payload_->target_position_ - payload_->position_).norm();
-        return distance_to_target < 0.5;
-    }
-    return false;
-}
 
 /********************************************************************************************/
 /* Dynamics factor: constant-velocity model */
@@ -357,7 +196,7 @@ bool PayloadVelocityFactor::skip_factor() {
 DynamicsFactor::DynamicsFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
     float sigma, const Eigen::VectorXd& measurement, 
     float dt)
-    : Factor{f_id, r_id, variables, sigma, measurement}{ 
+    : Factor{f_id, r_id, variables, sigma, measurement} { 
         factor_type_ = DYNAMICS_FACTOR;
         Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n_dofs_/2,n_dofs_/2);
         Eigen::MatrixXd O = Eigen::MatrixXd::Zero(n_dofs_/2,n_dofs_/2);
@@ -390,44 +229,6 @@ Eigen::MatrixXd DynamicsFactor::J_func_(const Eigen::VectorXd& X){
 // position at the same timestep (collision). This factor is created between variables of two robots.
 // The factor has 0 energy if the variables are further away than the safety distance. skip_ = true in this case.
 /********************************************************************************************/
-GeometryFactor::GeometryFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
-    float sigma, const Eigen::VectorXd& measurement) 
-    : Factor{f_id, r_id, variables, sigma, measurement} {
-        factor_type_ = GEOMETRY_FACTOR;
-        this->delta_jac = 1e-2;
-};
-
-
-Eigen::MatrixXd GeometryFactor::h_func_(const Eigen::VectorXd& X) {
-    
-    Eigen::Vector2d pos_current = X.segment(0, 2);
-    Eigen::Vector2d pos_left = X.segment(4, 2);
-    Eigen::Vector2d pos_right = X.segment(6, 2);
-
-    // calculate current distance between the adjacent robots;
-    double dist_left = (pos_current - pos_left).norm();
-    double dist_right = (pos_current - pos_right).norm();
-
-    // calculate the angle between the 2 vectors
-    Eigen::Vector2d vec_to_left = pos_left - pos_current;
-    Eigen::Vector2d vec_to_right = pos_right - pos_current;
-    
-    double norm_left = vec_to_left.norm() + 1e-6;
-    double norm_right = vec_to_right.norm() + 1e-6;
-    double cos_angle = vec_to_left.dot(vec_to_right) / (norm_left * norm_right);
-
-    //clamp cos_angle to [-1, 1] to avoid NaN errors
-    cos_angle = std::max(-1.0, std::min(1.0, cos_angle));
-    double current_angle = acos(cos_angle);
-
-    Eigen::MatrixXd h(3, 1);
-    h(0, 0) = dist_left - desired_length_;
-    h(1, 0) = dist_right - desired_length_;
-    h(2, 0) = current_angle - desired_angle_;
-    
-    return h;
-
-};
 
 InterrobotFactor::InterrobotFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
     float sigma, const Eigen::VectorXd& measurement, 

@@ -20,7 +20,7 @@ using Eigen::last;
 class Variable;     // Forward declaration
 
 // Types of factors defined. Default is DEFAULT_FACTOR
-enum FactorType {DEFAULT_FACTOR, DYNAMICS_FACTOR, INTERROBOT_FACTOR, OBSTACLE_FACTOR, CONTACT_FACTOR, PAYLOAD_VELOCITY_FACTOR, GEOMETRY_FACTOR};
+enum FactorType {DEFAULT_FACTOR, DYNAMICS_FACTOR, INTERROBOT_FACTOR, OBSTACLE_FACTOR};
 /*****************************************************************************************/
 // Factor used in GBP
 /*****************************************************************************************/
@@ -80,76 +80,6 @@ class Factor {
 // Create a measurement function h_func_() and optionally Jacobian J_func_().
 
 
-class ContactFactor : public Factor {
-public:
-    ContactFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
-                  float sigma, const Eigen::VectorXd& measurement,
-                  std::shared_ptr<Payload> payload,
-                  Eigen::Vector2d target_contact_point,
-                  Simulator* sim);
-    
-    Eigen::MatrixXd h_func_(const Eigen::VectorXd& X) override;
-    // Eigen::MatrixXd J_func_(const Eigen::VectorXd& X) override;
-    bool skip_factor() override;
-    void draw();
-    
-    int getPayloadId() const { return payload_->payload_id_; }
-
-private:
-    std::shared_ptr<Payload> payload_;
-    Eigen::Vector2d target_contact_point_;
-    Simulator* sim_;
-    
-    double computeContactError(const Eigen::Vector2d& robot_pos);
-    Eigen::Vector2d payloadToWorld(const Eigen::Vector2d& local_point);
-};
-
-// 新增PayloadVelocityFactor类声明
-class PayloadVelocityFactor : public Factor {
-public:
-    PayloadVelocityFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
-                          float sigma, const Eigen::VectorXd& measurement,
-                          std::shared_ptr<Payload> payload,
-                          Eigen::Vector2d contact_normal);
-    
-    Eigen::MatrixXd h_func_(const Eigen::VectorXd& X) override;
-    // Eigen::MatrixXd J_func_(const Eigen::VectorXd& X) override;
-    bool skip_factor() override;
-    
-    int getPayloadId() const { return payload_->payload_id_; }
-
-private:
-    std::shared_ptr<Payload> payload_;
-    Eigen::Vector2d contact_normal_;
-    
-    std::pair<double, double> computeDesiredPayloadMotion();
-    std::pair<double, double> computeRobotContribution(const Eigen::Vector2d& robot_pos, 
-                                                      const Eigen::Vector2d& robot_velocity);
-};
-
-// Payload施力因子：在保持接触的前提下优化施力
-class PayloadForceFactor : public Factor {
-public:
-    PayloadForceFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
-                       float sigma, const Eigen::VectorXd& measurement,
-                       std::shared_ptr<Payload> payload,
-                       Eigen::Vector2d contact_normal,
-                       Simulator* sim);
-    
-    Eigen::MatrixXd h_func_(const Eigen::VectorXd& X) override;
-    Eigen::MatrixXd J_func_(const Eigen::VectorXd& X) override;
-    bool skip_factor() override;
-
-private:
-    std::shared_ptr<Payload> payload_;
-    Eigen::Vector2d contact_normal_;
-    Simulator* sim_;
-    
-    // 计算期望的法向力大小
-    double computeDesiredNormalForce();
-    // 检查机器人是否与payload接触
-    bool isRobotInContact();
-};
 
 /********************************************************************************************/
 /* Dynamics factor: constant-velocity model */
@@ -172,21 +102,6 @@ class DynamicsFactor: public Factor {
 // position at the same timestep (collision). This factor is created between variables of two robots.
 // The factor has 0 energy if the variables are further away than the safety distance. skip_ = true in this case.
 /********************************************************************************************/
-class GeometryFactor: public Factor {
-    public:
-    float desired_length_ = 0.5 * sqrt(2) * globals.PAYLOAD_WIDTH;
-    float desired_angle_ = M_PI / 2;
-    int left_rid_;
-    int right_rid_;
-
-    GeometryFactor(int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
-        float sigma, const Eigen::VectorXd& measurement);
-    
-    Eigen::MatrixXd h_func_(const Eigen::VectorXd& X);
-    // bool skip_factor() override;
-
-};
-
 class InterrobotFactor: public Factor {
     public:
     double safety_distance_;
