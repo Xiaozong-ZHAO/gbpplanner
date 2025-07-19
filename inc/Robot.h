@@ -59,9 +59,7 @@ public:
     bool usePhysics_;
     b2WeldJoint* payload_joint_;  // 新增：与payload的焊接关节
 
-    // 简化后的payload相关方法
-    void createPayloadFactors(std::shared_ptr<Payload> payload);
-    void deletePayloadFactors(std::shared_ptr<Payload> payload);
+    // Payload factors removed - only dynamics, interrobot, and obstacle factors are used
     
     // 查询方法
     bool isConnectedToPayload(int payload_id) const;
@@ -88,10 +86,8 @@ public:
     // Delete existing inter-robot factors for faraway robots
     /***************************************************************************************************/    
     void updateInterrobotFactors();
-    void updateGeometryFactors();
     void createInterrobotFactors(std::shared_ptr<Robot> other_robot);
-    void deleteInterrobotFactors(std::shared_ptr<Robot> other_robot);
-    void createGeometryFactors(std::shared_ptr<Robot> neighbour_left, std::shared_ptr<Robot> neighbour_right);  
+    void deleteInterrobotFactors(std::shared_ptr<Robot> other_robot);  
     
 
     /***************************************************************************************************/    

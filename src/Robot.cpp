@@ -214,15 +214,7 @@ void Robot::detachFromPayload() {
     }
 }
 
-void Robot::createPayloadFactors(std::shared_ptr<Payload> payload) {
-    // Payload factors removed - only dynamics, interrobot, and obstacle factors are used
-    // 添加到connected payloads列表
-    this->connected_payload_ids_.push_back(payload->payload_id_);
-}
 
-void Robot::deletePayloadFactors(std::shared_ptr<Payload> payload) {
-    // Payload factors removed - only dynamics, interrobot, and obstacle factors are used
-}
 
 bool Robot::isConnectedToPayload(int payload_id) const {
     return std::find(connected_payload_ids_.begin(), connected_payload_ids_.end(), payload_id) 
@@ -347,16 +339,10 @@ void Robot::updateInterrobotFactors(){
     }
 }
 
-void Robot::updateGeometryFactors(){
-    // Geometry factors removed - only dynamics, interrobot, and obstacle factors are used
-}
 
 /***************************************************************************************************/
 // Create inter-robot factors between this robot and another robot
 /***************************************************************************************************/
-void Robot::createGeometryFactors(std::shared_ptr<Robot> neighbour_left, std::shared_ptr<Robot> neighbour_right){
-    // Geometry factors removed - only dynamics, interrobot, and obstacle factors are used
-}
 
 void Robot::createInterrobotFactors(std::shared_ptr<Robot> other_robot)
 {

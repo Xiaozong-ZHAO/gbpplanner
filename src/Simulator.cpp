@@ -471,9 +471,7 @@ void Simulator::createOrDeleteRobots(){
     }
 
     locateNearbys(robots_);
-    for (auto& [rid, robot]: robots_) {
-        robot->updateGeometryFactors();
-    }
+    // Geometry factors removed - only dynamics, interrobot, and obstacle factors are used
     // Delete robots
     for (auto robot : robots_to_delete){
         deleteRobot(robot);
