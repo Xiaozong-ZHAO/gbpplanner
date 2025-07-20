@@ -295,3 +295,20 @@ Eigen::MatrixXd ObstacleFactor::h_func_(const Eigen::VectorXd& X){
     h(0) = c_hsv.z;
     return h;
 };
+
+ObsFactor::ObsFactor(Simulator* sim, int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
+    float sigma, const Eigen::VectorXd& measurement)
+    : Factor{f_id, r_id, variables, sigma, measurement} {
+        factor_type_ = OBS_FACTOR;
+};
+
+Eigen::MatrixXd ObsFactor::h_func_(const Eigen::VectorXd& X) {
+    float padding = 0.1;
+    // R_PAYLOAD is half of diagonal of the payload rectangle
+    float r_payload = sqrt(pow(globals.PAYLOAD_HEIGHT, 2) + pow(globals.PAYLOAD_WIDTH, 2)) / 2.0;
+    // get obstacle information from sim->obstacles_
+    Eigen::MatrixXd h = Eigen::MatrixXd::Zero(1, 1);
+    for (const auto& obstacle: sim_->obstacles_) {
+
+    }
+}

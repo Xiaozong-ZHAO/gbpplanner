@@ -240,7 +240,7 @@ void Simulator::updateDistributedPayloadControl() {
                 connected_robots++;
             }
         }
-        std::cout << "Payload " << pid << " has " << connected_robots << " connected robots." << std::endl;
+        // std::cout << "Payload " << pid << " has " << connected_robots << " connected robots." << std::endl;
     }
 }
 

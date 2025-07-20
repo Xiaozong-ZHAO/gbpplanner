@@ -20,7 +20,7 @@ using Eigen::last;
 class Variable;     // Forward declaration
 
 // Types of factors defined. Default is DEFAULT_FACTOR
-enum FactorType {DEFAULT_FACTOR, DYNAMICS_FACTOR, INTERROBOT_FACTOR, OBSTACLE_FACTOR};
+enum FactorType {DEFAULT_FACTOR, DYNAMICS_FACTOR, INTERROBOT_FACTOR, OBSTACLE_FACTOR, OBS_FACTOR};
 /*****************************************************************************************/
 // Factor used in GBP
 /*****************************************************************************************/
@@ -131,4 +131,13 @@ class ObstacleFactor: public Factor {
 
     Eigen::MatrixXd h_func_(const Eigen::VectorXd& X);
 
+};
+
+class ObsFactor: public Factor {
+    public:
+    ObsFactor(Simulator* sim, int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
+        float sigma, const Eigen::VectorXd& measurement, );
+
+    Eigen::MatrixXd h_func_(const Eigen::VectorXd& X);
+    Eigen::MatrixXd J_func_(const Eigen::VectorXd& X);
 };
