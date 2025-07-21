@@ -366,7 +366,6 @@ Eigen::MatrixXd ObsFactor::h_func_(const Eigen::VectorXd &X)
     {
         h(0, 0) = 0.0; // obstacle is far enough
     }
-    std:: cout << "Robot " << r_id_ << " Residual: " << h(0, 0) << std::endl;
     return h;
 }
 

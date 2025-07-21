@@ -36,8 +36,8 @@ Simulator::Simulator(){
     ImageColorInvert(&obstacleImg);
     graphics = new Graphics(obstacleImg);
 
-
-    createPayload(Eigen::Vector2d(0., 0.), globals.PAYLOAD_WIDTH, globals.PAYLOAD_HEIGHT);
+    Eigen::Vector2d starting_position = Eigen::Vector2d(globals.STARTING_X, globals.STARTING_Y);
+    createPayload(starting_position, globals.PAYLOAD_WIDTH, globals.PAYLOAD_HEIGHT);
     
     // Load obstacles from JSON file
     loadObstacles();
@@ -53,11 +53,11 @@ void Simulator::createPayload(Eigen::Vector2d position, float width, float heigh
     payloads_[payload->payload_id_] = payload;
     
     // 计算绝对目标位置（基于相对位置）
-    Eigen::Vector2d absolute_target_position = position + Eigen::Vector2d(globals.TARGET_RELATIVE_X, globals.TARGET_RELATIVE_Y);
+    Eigen::Vector2d target_position = Eigen::Vector2d(globals.TARGET_RELATIVE_X, globals.TARGET_RELATIVE_Y);
     
     // 设置目标位置
-    payload->setTarget(absolute_target_position);
-    
+    payload->setTarget(target_position);
+
     // 设置目标朝向（如果payload支持）
     // 关键修复：使用相对旋转设置目标朝向
     if (std::abs(globals.TARGET_RELATIVE_ROTATION) > 0.001) {  // 如果有旋转目标

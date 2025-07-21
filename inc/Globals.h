@@ -74,6 +74,8 @@ class Globals {
     float TARGET_Y;
     float MAX_ANGULAR_SPEED;
 
+    float STARTING_X;
+    float STARTING_Y;
     float TARGET_RELATIVE_X;
     float TARGET_RELATIVE_Y;
     float TARGET_RELATIVE_ROTATION;
