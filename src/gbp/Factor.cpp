@@ -333,17 +333,14 @@ ObsFactor::ObsFactor(
     int o_id,
     std::vector<std::shared_ptr<Variable>> variables,
     float sigma,
-    const Eigen::VectorXd &measurement,
-    const Eigen::VectorXd obs_pos,
-    float obstacle_radius)
-    : Factor{f_id, r_id, variables, sigma, measurement},
-      obs_pos_(obs_pos),
-      obstacle_radius_(obstacle_radius)
+    const Eigen::VectorXd &measurement)
+    : Factor{f_id, r_id, variables, sigma, measurement}
 {
     sim_ = sim;
     factor_type_ = OBS_FACTOR;
     o_id_ = o_id;
     padding_ = 0.1;
+    obstacle_radius_ = sim_->obstacles_[o_id_].radius;
 }
 
 Eigen::MatrixXd ObsFactor::h_func_(const Eigen::VectorXd &X)
@@ -372,7 +369,7 @@ Eigen::MatrixXd ObsFactor::h_func_(const Eigen::VectorXd &X)
     {
         h(0) = 0.0; // obstacle is far enough
     }
-
+    std::cout << "[ROBOT]" << r_id_ << "[OBSTACLE]" << o_id_ << "d: " << d_ << std::endl;
     return h;
 }
 

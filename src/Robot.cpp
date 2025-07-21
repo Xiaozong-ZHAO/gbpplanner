@@ -151,14 +151,24 @@ Robot::Robot(Simulator* sim,
     /***************************************************************************/
     // Create Obstacle factors for all variables excluding start, excluding horizon
     /***************************************************************************/
-    for (int i = 1; i < num_variables_-1; i++)
-    {
-        std::vector<std::shared_ptr<Variable>> variables{getVar(i)};
-        auto fac_obs = std::make_shared<ObstacleFactor>(sim, sim->next_fid_++, rid_, variables, globals.SIGMA_FACTOR_OBSTACLE, Eigen::VectorXd::Zero(1), &(sim_->obstacleImg));
+    // for (int i = 1; i < num_variables_-1; i++)
+    // {
+    //     std::vector<std::shared_ptr<Variable>> variables{getVar(i)};
+    //     auto fac_obs = std::make_shared<ObstacleFactor>(sim, sim->next_fid_++, rid_, variables, globals.SIGMA_FACTOR_OBSTACLE, Eigen::VectorXd::Zero(1), &(sim_->obstacleImg));
 
-        // Add this factor to the variable's list of adjacent factors, as well as to the robot's list of factors
-        for (auto var : fac_obs->variables_) var->add_factor(fac_obs);
-        this->factors_[fac_obs->key_] = fac_obs;
+    //     // Add this factor to the variable's list of adjacent factors, as well as to the robot's list of factors
+    //     for (auto var : fac_obs->variables_) var->add_factor(fac_obs);
+    //     this->factors_[fac_obs->key_] = fac_obs;
+    // }
+
+    for (int i = 1; i < num_variables_-1; i++) {
+        int num_obs = sim_->obstacles_.size();
+        std::vector<std::shared_ptr<Variable>> variables{getVar(i)};
+        for (int o_id = 0; o_id < num_obs; o_id++) {
+            std::shared_ptr<ObsFactor> obs_fac = std::make_shared<ObsFactor>(sim, sim->next_fid_++, rid_, o_id, variables, globals.SIGMA_FACTOR_OBSTACLE, Eigen::VectorXd::Zero(1));
+            for (auto var : obs_fac->variables_) var->add_factor(obs_fac);
+            this->factors_[obs_fac->key_] = obs_fac;
+        }
     }
 
     // for (auto& [pid, payload]: payloads_) {
