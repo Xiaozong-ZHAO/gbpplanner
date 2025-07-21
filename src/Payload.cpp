@@ -108,6 +108,7 @@ void Payload::draw() {
     float y = static_cast<float>(position_.y());
     Vector3 position3D = {x, 0.5f, y};
     Vector3 size = {width_, 1.0f, height_};
+    float radius = sqrt(width_ * width_ + height_ * height_) / 2.0f;
     
     // 根据任务状态选择颜色
     Color drawColor = task_completed_ ? GREEN : color_;
@@ -135,6 +136,10 @@ void Payload::draw() {
     DrawCube({0, 0, 0}, size.x * 1.1f, 0.2f, size.z * 1.1f, ColorAlpha(RED, 0.3f));
     DrawCubeWires({0, 0, 0}, size.x * 1.1f, 0.2f, size.z * 1.1f, RED);
     rlPopMatrix();
+
+    // draw a circle with the variable radius
+    DrawCircleLines(static_cast<int>(x), static_cast<int>(y), radius, ColorAlpha(GREEN, 0.5f));
+
     
     // 绘制payload到目标的连线（保持原有逻辑）
     if (!task_completed_) {
@@ -160,8 +165,6 @@ void Payload::draw() {
         DrawLine3D(target_center, arrow_end, ORANGE);
         DrawSphere(arrow_end, 0.8f, ORANGE);  // 箭头头部
         
-        // 可选：绘制朝向标识文字
-        // DrawText3D(font, "TARGET", arrow_end, 1.0f, 1.0f, false, WHITE);
     }
     
     // 新增：绘制当前朝向指示箭头（用于对比）

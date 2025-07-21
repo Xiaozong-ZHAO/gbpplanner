@@ -339,7 +339,7 @@ ObsFactor::ObsFactor(
     sim_ = sim;
     factor_type_ = OBS_FACTOR;
     o_id_ = o_id;
-    padding_ = 0.1;
+    padding_ = 0.0;
     obstacle_radius_ = sim_->obstacles_[o_id_].radius;
 }
 
@@ -369,7 +369,7 @@ Eigen::MatrixXd ObsFactor::h_func_(const Eigen::VectorXd &X)
     {
         h(0) = 0.0; // obstacle is far enough
     }
-    std::cout << "[ROBOT]" << r_id_ << "[OBSTACLE]" << o_id_ << "d: " << d_ << std::endl;
+    std::cout << "[ROBOT]" << r_id_ << "[OBSTACLE]" << o_id_ << "distance: " << d_-D1 << std::endl;
     return h;
 }
 

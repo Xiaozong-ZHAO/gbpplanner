@@ -70,6 +70,7 @@
         "core": "cpp",
         "codecvt": "cpp",
         "condition_variable": "cpp",
-        "typeindex": "cpp"
+        "typeindex": "cpp",
+        "*.m": "cpp"
     }
 }
