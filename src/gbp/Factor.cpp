@@ -341,19 +341,17 @@ ObsFactor::ObsFactor(
     o_id_ = o_id;
     padding_ = 0.01;
     obstacle_radius_ = sim_->obstacles_[o_id_].radius;
+    payload_radius_ = sqrt(pow(globals.PAYLOAD_HEIGHT, 2) + pow(globals.PAYLOAD_WIDTH, 2)) / 2.0;
+    D0 = obstacle_radius_ + payload_radius_;
+    D1 = obstacle_radius_ + payload_radius_ + padding_;
 }
 
 Eigen::MatrixXd ObsFactor::h_func_(const Eigen::VectorXd &X)
 {
     auto payload_pos = sim_->payloads_.begin()->second->getPosition();
-    // R_PAYLOAD is half of diagonal of the payload rectangle
-    payload_radius_ = sqrt(pow(globals.PAYLOAD_HEIGHT, 2) + pow(globals.PAYLOAD_WIDTH, 2)) / 2.0;
     obs_pos_ = sim_->obstacles_[o_id_].position;
     r_ = Eigen::Vector2d(payload_pos.x(), payload_pos.y()) - X.head<2>();
-
     d_ = (payload_pos - obs_pos_).norm();
-    D0 = obstacle_radius_ + payload_radius_;
-    D1 = obstacle_radius_ + payload_radius_ + padding_;
 
     Eigen::MatrixXd h = Eigen::MatrixXd::Zero(1, 1);
     if (d_ <= D1 && d_ >= D0)
@@ -368,6 +366,7 @@ Eigen::MatrixXd ObsFactor::h_func_(const Eigen::VectorXd &X)
     {
         h(0, 0) = 0.0; // obstacle is far enough
     }
+    std:: cout << "Robot " << r_id_ << " Residual: " << h(0, 0) << std::endl;
     return h;
 }
 
@@ -378,14 +377,12 @@ Eigen::MatrixXd ObsFactor::J_func_(const Eigen::VectorXd &X)
     auto payload_pos = sim_->payloads_.begin()->second->getPosition();
 
     d_ = (payload_pos - obs_pos_).norm();
-    D0 = obstacle_radius_ + payload_radius_;
-    D1 = obstacle_radius_ + payload_radius_ + padding_;
 
-    if (d_ <= D1 && d_ >= D0){
+    if (d_ <= D1){
         Eigen::Vector2d n = (payload_pos - obs_pos_) / d_;
         J(0, 0) = -n.x() / padding_; 
         J(0, 1) = -n.y() / padding_;
     }
-    std::cout << "Robot " << r_id_ << " obstacle " << o_id_ << " distance: " << d_-D1 << std::endl;
+    // std::cout << "Robot " << r_id_ << " obstacle " << o_id_ << " distance: " << d_-D1 << std::endl;
     return J;
 }
