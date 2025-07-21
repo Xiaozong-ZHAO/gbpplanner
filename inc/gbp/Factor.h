@@ -135,17 +135,17 @@ class ObstacleFactor: public Factor {
 
 class ObsFactor: public Factor {
     public:
-    Eigen::VectorXd obs_pos_;
+    Eigen::Vector2d obs_pos_;
+    Eigen::Vector2d r_;
     float obstacle_radius_;
+    int o_id_;
+    float padding_;
+    float d_;
+    float D0, D1;
 
-    ObsFactor(Simulator* sim, int f_id, int r_id, std::vector<std::shared_ptr<Variable>> variables,
-        float sigma, const Eigen::VectorXd& measurement, const Eigen::VectorXd obs_pos, float obstacle_radius)
-        : Factor(f_id, r_id, variables, sigma, measurement),
-            obs_pos_(obs_pos),
-            obstacle_radius_(obstacle_radius) {
-                sim_ = sim;
-                factor_type_ = OBS_FACTOR;
-            }
+
+    ObsFactor(Simulator* sim, int f_id, int r_id, int o_id, std::vector<std::shared_ptr<Variable>> variables,
+        float sigma, const Eigen::VectorXd& measurement, const Eigen::VectorXd obs_pos, float obstacle_radius);
 
     Eigen::MatrixXd h_func_(const Eigen::VectorXd& X) override;
     Eigen::MatrixXd J_func_(const Eigen::VectorXd& X) override;

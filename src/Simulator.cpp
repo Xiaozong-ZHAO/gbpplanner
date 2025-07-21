@@ -398,6 +398,8 @@ void Simulator::createOrDeleteRobots(){
         Eigen::Vector2d payload_centroid = payload->getPosition();
         Eigen::Vector2d payload_target = payload->getTarget();
         Eigen::MatrixXd payload_R = Quat2Rot(payload->getTargetRotation());
+
+        std::cout << "Rotation matrix is" << payload_R << std::endl;
         
         if (contact_points.empty()) {
             std::cout << "Warning: No contact points available for payload" << std::endl;
