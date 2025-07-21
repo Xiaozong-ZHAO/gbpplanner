@@ -339,7 +339,7 @@ ObsFactor::ObsFactor(
     sim_ = sim;
     factor_type_ = OBS_FACTOR;
     o_id_ = o_id;
-    padding_ = 0.0;
+    padding_ = 0.01;
     obstacle_radius_ = sim_->obstacles_[o_id_].radius;
 }
 
@@ -356,17 +356,17 @@ Eigen::MatrixXd ObsFactor::h_func_(const Eigen::VectorXd &X)
     D1 = obstacle_radius_ + payload_radius_ + padding_;
 
     Eigen::MatrixXd h = Eigen::MatrixXd::Zero(1, 1);
-    if (d_ <= D0 && d_ >= D1)
+    if (d_ <= D1 && d_ >= D0)
     {
-        h(0) = 1.0 * (1.0 - (d_ - D0) / padding_); // Linear falloff between D1 and D0
+        h(0, 0) = 1.0 * (1.0 - (d_ - D0) / padding_); // Linear falloff between D1 and D0
     }
     else if (d_ < D0)
     {
-        h(0) = 1.0; // Obstacle is too close, large penalty
+        h(0, 0) = 1.0; // Obstacle is too close, large penalty
     }
     else if (d_ > D1)
     {
-        h(0) = 0.0; // obstacle is far enough
+        h(0, 0) = 0.0; // obstacle is far enough
     }
     return h;
 }
@@ -377,9 +377,14 @@ Eigen::MatrixXd ObsFactor::J_func_(const Eigen::VectorXd &X)
     obs_pos_ = sim_->obstacles_[o_id_].position;
     auto payload_pos = sim_->payloads_.begin()->second->getPosition();
 
-    if (d_ <= D0 && d_ >= D1){
-        J(0, 0) = -(r_.x() - obs_pos_.x() + X(0)) / (d_ * padding_); 
-        J(0, 1) = -(r_.y() - obs_pos_.y() + X(1)) / (d_ * padding_);
+    d_ = (payload_pos - obs_pos_).norm();
+    D0 = obstacle_radius_ + payload_radius_;
+    D1 = obstacle_radius_ + payload_radius_ + padding_;
+
+    if (d_ <= D1 && d_ >= D0){
+        Eigen::Vector2d n = (payload_pos - obs_pos_) / d_;
+        J(0, 0) = -n.x() / padding_; 
+        J(0, 1) = -n.y() / padding_;
     }
     std::cout << "Robot " << r_id_ << " obstacle " << o_id_ << " distance: " << d_-D1 << std::endl;
     return J;
