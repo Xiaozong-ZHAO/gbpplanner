@@ -339,7 +339,7 @@ ObsFactor::ObsFactor(
     sim_ = sim;
     factor_type_ = OBS_FACTOR;
     o_id_ = o_id;
-    padding_ = 0.1;
+    padding_ = 0.0;
     obstacle_radius_ = sim_->obstacles_[o_id_].radius;
 }
 

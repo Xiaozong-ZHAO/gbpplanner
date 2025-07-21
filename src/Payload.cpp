@@ -137,8 +137,9 @@ void Payload::draw() {
     DrawCubeWires({0, 0, 0}, size.x * 1.1f, 0.2f, size.z * 1.1f, RED);
     rlPopMatrix();
 
-    // draw a circle with the variable radius
-    DrawCircleLines(static_cast<int>(x), static_cast<int>(y), radius, ColorAlpha(GREEN, 0.5f));
+    // draw a circle with the variable radius in 3D
+    Vector3 circle_center = {x, 0.1f, y};
+    DrawCircle3D(circle_center, radius, {1, 0, 0}, 90.0f, ColorAlpha(GREEN, 0.5f));
 
     
     // 绘制payload到目标的连线（保持原有逻辑）
