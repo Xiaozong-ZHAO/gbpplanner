@@ -11,14 +11,14 @@
   "DRAW_WAYPOINTS": 0,
   
   "##": "Simulation parameters",
-  "SEED": 2,
+  "SEED": 0.5,
   "TIMESTEP": 0.1,
   "MAX_TIME": 10000,
   "NUM_ROBOTS": 4,
   "T_HORIZON": 10,
   "ROBOT_RADIUS": 1,
   "COMMUNICATION_RADIUS": 20,
-  "MAX_SPEED": 2,
+  "MAX_SPEED": 5.0,
   "COMMS_FAILURE_RATE": 0,
   "FORMATION": "Payload",
   "OBSTACLE_FILE": "",
@@ -49,6 +49,7 @@
 
  
   "CONTACT_ASSIGNMENT_RADIUS": 5.0,
+  "OBSTACLE_PADDING": 0.02,
 
   "STARTING_X": -20.0,
   "STARTING_Y": 0.0,

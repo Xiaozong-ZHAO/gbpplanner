@@ -73,6 +73,7 @@ class Globals {
     float TARGET_X;
     float TARGET_Y;
     float MAX_ANGULAR_SPEED;
+    float OBSTACLE_PADDING;
 
     float STARTING_X;
     float STARTING_Y;
