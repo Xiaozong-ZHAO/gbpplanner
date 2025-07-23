@@ -5,6 +5,7 @@
 #include <Eigen/Dense>
 #include <memory>
 #include <raylib.h>
+#include <vector>
 
 class Simulator;
 
@@ -74,6 +75,8 @@ class Payload {
 
     private:
         Simulator* sim_;
+        std::vector<Eigen::Vector2d> trajectory_history_;
+        static const size_t MAX_TRAJECTORY_POINTS = 1000;
 };
 
 # endif // PAYLOAD_H

@@ -28,6 +28,8 @@ Payload::Payload(Simulator* sim,
     target_tolerance_(2.0f), // 默认容忍距离
     target_orientation_(Eigen::Quaterniond::Identity()),
     velocity_(Eigen::Vector2d::Zero()) {
+        trajectory_history_.reserve(MAX_TRAJECTORY_POINTS);
+        trajectory_history_.push_back(initial_position);
         physicsWorld_ = sim->getPhysicsWorld();
         if (physicsWorld_){
             createPhysicsBody(density);
@@ -85,6 +87,12 @@ void Payload::update() {
         
         // 正确更新current_orientation_
         current_orientation_ = Eigen::Quaterniond(cos(rotation_/2), 0, 0, sin(rotation_/2));
+        
+        // Record trajectory
+        if (trajectory_history_.size() >= MAX_TRAJECTORY_POINTS) {
+            trajectory_history_.erase(trajectory_history_.begin());
+        }
+        trajectory_history_.push_back(position_);
     }
 }
 
@@ -106,6 +114,15 @@ Eigen::Vector2d Payload::getTarget(){
 void Payload::draw() {
     float x = static_cast<float>(position_.x());
     float y = static_cast<float>(position_.y());
+    
+    // Draw trajectory
+    if (trajectory_history_.size() > 1) {
+        for (size_t i = 1; i < trajectory_history_.size(); ++i) {
+            Vector3 start = {static_cast<float>(trajectory_history_[i-1].x()), 0.1f, static_cast<float>(trajectory_history_[i-1].y())};
+            Vector3 end = {static_cast<float>(trajectory_history_[i].x()), 0.1f, static_cast<float>(trajectory_history_[i].y())};
+            DrawLine3D(start, end, ColorAlpha(BLUE, 0.7f));
+        }
+    }
     Vector3 position3D = {x, 0.5f, y};
     Vector3 size = {width_, 1.0f, height_};
     float radius = sqrt(width_ * width_ + height_ * height_) / 2.0f;
