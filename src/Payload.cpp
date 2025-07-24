@@ -255,44 +255,70 @@ Eigen::Vector2d Payload::getVelocity() const {
 }
 
 std::pair<std::vector<Eigen::Vector2d>, std::vector<Eigen::Vector2d>> Payload::getContactPointsAndNormals() const {
-    std::vector<Eigen::Vector2d> points;
-    std::vector<Eigen::Vector2d> normals;
-    
-    if (!physicsBody_) return {points, normals};
-    
-    // 直接使用rotation_而不是从四元数计算
-    Eigen::Vector2d center = position_;
-    double rotation = rotation_;  // 直接使用，已经在update()中更新
-    
-    // 旋转矩阵
-    Eigen::Matrix2d rot;
-    rot << cos(rotation), -sin(rotation),
-           sin(rotation),  cos(rotation);
-    
-    // 在局部坐标系中定义接触点和法向量
-    // 上边的两个点
-    Eigen::Vector2d local_top1(0, -height_/2);
-    Eigen::Vector2d local_top2(0, height_/2);
-    Eigen::Vector2d local_top_normal(0, 1); // 向payload内部（向下）
-    
-    // 左边的两个点
-    Eigen::Vector2d local_left1(-width_/2, 0);
-    Eigen::Vector2d local_left2(width_/2, 0);
-    Eigen::Vector2d local_left_normal(1, 0); // 向payload内部（向右）
-    
-    // 转换到世界坐标系
-    points.push_back(center + rot * local_top1);
-    points.push_back(center + rot * local_top2);
-    points.push_back(center + rot * local_left1);
-    points.push_back(center + rot * local_left2);
-    
-    normals.push_back(rot * local_top_normal);
-    normals.push_back(rot * local_top_normal);
-    normals.push_back(rot * local_left_normal);
-    normals.push_back(rot * local_left_normal);
-    
-    return {points, normals};
+    float perimeter = 2 * (globals.PAYLOAD_HEIGHT + globals.PAYLOAD_WIDTH);
+    float delta = perimeter / globals.NUM_ROBOTS;
+    std::vector<Eigen::Vector2d> contact_points;
+    std::vector<Eigen::Vector2d> contact_normals;
+
+    for (int k = 0; k < globals.NUM_ROBOTS; k++) {
+        float dist = k * delta;
+        if ( dist < globals.PAYLOAD_WIDTH) {
+            // the contact point is on the top edge
+
+        } else if (dist < globals.PAYLOAD_WIDTH + globals.PAYLOAD_HEIGHT) {
+
+        } else if (dist < 2 * globals.PAYLOAD_WIDTH + globals.PAYLOAD_HEIGHT) {
+
+        } else if (dist < 2 * globals.PAYLOAD_WIDTH + 2 * globals.PAYLOAD_HEIGHT) {
+
+        } else {
+            std::cout << "Error: Contact point distance exceeds payload perimeter." << std::endl;
+            return {contact_points, contact_normals};
+        }
+    }
+
+    return {contact_points, contact_normals};
 }
+
+// std::pair<std::vector<Eigen::Vector2d>, std::vector<Eigen::Vector2d>> Payload::getContactPointsAndNormals() const {
+//     std::vector<Eigen::Vector2d> points;
+//     std::vector<Eigen::Vector2d> normals;
+    
+//     if (!physicsBody_) return {points, normals};
+    
+//     // 直接使用rotation_而不是从四元数计算
+//     Eigen::Vector2d center = position_;
+//     double rotation = rotation_;  // 直接使用，已经在update()中更新
+    
+//     // 旋转矩阵
+//     Eigen::Matrix2d rot;
+//     rot << cos(rotation), -sin(rotation),
+//            sin(rotation),  cos(rotation);
+    
+//     // 在局部坐标系中定义接触点和法向量
+//     // 上边的两个点
+//     Eigen::Vector2d local_top1(0, -height_/2);
+//     Eigen::Vector2d local_top2(0, height_/2);
+//     Eigen::Vector2d local_top_normal(0, 1); // 向payload内部（向下）
+    
+//     // 左边的两个点
+//     Eigen::Vector2d local_left1(-width_/2, 0);
+//     Eigen::Vector2d local_left2(width_/2, 0);
+//     Eigen::Vector2d local_left_normal(1, 0); // 向payload内部（向右）
+    
+//     // 转换到世界坐标系
+//     points.push_back(center + rot * local_top1);
+//     points.push_back(center + rot * local_top2);
+//     points.push_back(center + rot * local_left1);
+//     points.push_back(center + rot * local_left2);
+    
+//     normals.push_back(rot * local_top_normal);
+//     normals.push_back(rot * local_top_normal);
+//     normals.push_back(rot * local_left_normal);
+//     normals.push_back(rot * local_left_normal);
+    
+//     return {points, normals};
+// }
 
 // 辅助函数：从四元数提取2D旋转角度
 // 如果需要在其他地方使用四元数，确保getRotationFromQuaternion正确实现
