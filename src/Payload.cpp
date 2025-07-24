@@ -262,19 +262,59 @@ std::pair<std::vector<Eigen::Vector2d>, std::vector<Eigen::Vector2d>> Payload::g
 
     for (int k = 0; k < globals.NUM_ROBOTS; k++) {
         float dist = k * delta;
-        if ( dist < globals.PAYLOAD_WIDTH) {
-            // the contact point is on the top edge
+        Eigen::Vector2d contact_point;
+        Eigen::Vector2d normal;
+        
+        if (dist < globals.PAYLOAD_WIDTH) {
+            // Top edge: x varies from -width/2 to +width/2, y = +height/2
+            contact_point = Eigen::Vector2d(
+                -globals.PAYLOAD_WIDTH/2 + dist,
+                globals.PAYLOAD_HEIGHT/2
+            );
+            normal = Eigen::Vector2d(0, 1);  // Outward normal
 
         } else if (dist < globals.PAYLOAD_WIDTH + globals.PAYLOAD_HEIGHT) {
+            // Right edge: x = +width/2, y varies from +height/2 to -height/2
+            float edge_dist = dist - globals.PAYLOAD_WIDTH;
+            contact_point = Eigen::Vector2d(
+                globals.PAYLOAD_WIDTH/2,
+                globals.PAYLOAD_HEIGHT/2 - edge_dist
+            );
+            normal = Eigen::Vector2d(1, 0);  // Outward normal
 
         } else if (dist < 2 * globals.PAYLOAD_WIDTH + globals.PAYLOAD_HEIGHT) {
+            // Bottom edge: x varies from +width/2 to -width/2, y = -height/2
+            float edge_dist = dist - globals.PAYLOAD_WIDTH - globals.PAYLOAD_HEIGHT;
+            contact_point = Eigen::Vector2d(
+                globals.PAYLOAD_WIDTH/2 - edge_dist,
+                -globals.PAYLOAD_HEIGHT/2
+            );
+            normal = Eigen::Vector2d(0, -1);  // Outward normal
 
         } else if (dist < 2 * globals.PAYLOAD_WIDTH + 2 * globals.PAYLOAD_HEIGHT) {
+            // Left edge: x = -width/2, y varies from -height/2 to +height/2
+            float edge_dist = dist - 2 * globals.PAYLOAD_WIDTH - globals.PAYLOAD_HEIGHT;
+            contact_point = Eigen::Vector2d(
+                -globals.PAYLOAD_WIDTH/2,
+                -globals.PAYLOAD_HEIGHT/2 + edge_dist
+            );
+            normal = Eigen::Vector2d(-1, 0);  // Outward normal
 
         } else {
             std::cout << "Error: Contact point distance exceeds payload perimeter." << std::endl;
             return {contact_points, contact_normals};
         }
+        
+        // Transform contact point and normal to world coordinates
+        Eigen::Matrix2d rotation_matrix;
+        rotation_matrix << cos(rotation_), -sin(rotation_),
+                          sin(rotation_),  cos(rotation_);
+        
+        Eigen::Vector2d world_contact_point = position_ + rotation_matrix * contact_point;
+        Eigen::Vector2d world_normal = rotation_matrix * normal;
+        
+        contact_points.push_back(world_contact_point);
+        contact_normals.push_back(world_normal);
     }
 
     return {contact_points, contact_normals};

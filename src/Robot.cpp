@@ -210,7 +210,7 @@ void Robot::attachToPayload(std::shared_ptr<Payload> payload, const Eigen::Vecto
     
     // 使用正确的参数名
     jointDef.stiffness = std::numeric_limits<float>::max();  // 刚度 (N*m) - 数值越大越"硬"
-    jointDef.damping = 1000.0f;     // 阻尼 (N*m*s) - 防止震荡
+    jointDef.damping = 3000.0f;     // 阻尼 (N*m*s) - 防止震荡
     
     // 创建关节
     payload_joint_ = (b2WeldJoint*)physicsWorld_->CreateJoint(&jointDef);
