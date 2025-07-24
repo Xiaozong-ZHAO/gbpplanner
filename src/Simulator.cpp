@@ -413,9 +413,12 @@ void Simulator::createOrDeleteRobots(){
             // 获取对应的接触点和法向量
             Eigen::Vector2d contact_point = contact_points[contact_point_index];
             Eigen::Vector2d contact_normal = contact_normals[contact_point_index];
-            
+
+            Eigen::Vector2d dir = (contact_point - payload_centroid).normalized();
+
+
             // 机器人初始位置：接触点 - 机器人半径 * 法向量
-            Eigen::Vector2d robot_start_pos = contact_point; /*- robot_radius * contact_normal;*/
+            Eigen::Vector2d robot_start_pos = contact_point + robot_radius * dir;
             
             Eigen::VectorXd starting(4);
             starting << robot_start_pos.x(), robot_start_pos.y(), 0.0, 0.0;

@@ -204,13 +204,17 @@ void Robot::attachToPayload(std::shared_ptr<Payload> payload, const Eigen::Vecto
     // 设置连接点（局部坐标）
     jointDef.localAnchorA = physicsBody_->GetLocalPoint(b2Vec2(attach_point.x(), attach_point.y()));
     jointDef.localAnchorB = payload->physicsBody_->GetLocalPoint(b2Vec2(attach_point.x(), attach_point.y()));
+
+    
     
     // 设置相对角度（保持当前相对角度）
     jointDef.referenceAngle = payload->physicsBody_->GetAngle() - physicsBody_->GetAngle();
     
     // 使用正确的参数名
-    jointDef.stiffness = std::numeric_limits<float>::max();  // 刚度 (N*m) - 数值越大越"硬"
-    jointDef.damping = 3000.0f;     // 阻尼 (N*m*s) - 防止震荡
+    // jointDef.stiffness = std::numeric_limits<float>::max();  // 刚度 (N*m) - 数值越大越"硬"
+    // jointDef.damping = std::numeric_limits<float>::max();     // 阻尼 (N*m*s) - 防止震荡
+    jointDef.stiffness = 1;  // 刚度 (N*m) - 数值越大越"硬"
+    jointDef.damping = 0;     // 阻尼 (N*m*s) - 防止震荡
     
     // 创建关节
     payload_joint_ = (b2WeldJoint*)physicsWorld_->CreateJoint(&jointDef);
@@ -341,12 +345,12 @@ void Robot::updateInterrobotFactors(){
         };
     }
     // Search through neighbours. If any are not in currently connected rids, create interrobot factors.
-    for (auto rid : neighbours_){
-        if (std::find(connected_r_ids_.begin(), connected_r_ids_.end(), rid)==connected_r_ids_.end()){
-            createInterrobotFactors(sim_->robots_.at(rid));
-            if (!sim_->symmetric_factors) sim_->robots_.at(rid)->connected_r_ids_.push_back(rid_);
-        };
-    }
+    // for (auto rid : neighbours_){
+    //     if (std::find(connected_r_ids_.begin(), connected_r_ids_.end(), rid)==connected_r_ids_.end()){
+    //         createInterrobotFactors(sim_->robots_.at(rid));
+    //         if (!sim_->symmetric_factors) sim_->robots_.at(rid)->connected_r_ids_.push_back(rid_);
+    //     };
+    // }
 }
 
 
