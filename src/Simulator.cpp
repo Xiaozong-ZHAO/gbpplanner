@@ -389,7 +389,7 @@ void Simulator::createOrDeleteRobots(){
         new_robots_needed_ = false;
         float robot_radius = globals.ROBOT_RADIUS;
         
-        // 获取payload信息
+        // 获取payload信息createOrDelete
         if (payloads_.empty()) return;
         
         auto payload = payloads_.begin()->second;
@@ -448,7 +448,10 @@ void Simulator::createOrDeleteRobots(){
                       << " at position (" << contact_point.x() << ", " << contact_point.y() << ")" << std::endl;
         }
         
-    }        
+    } else if (globals.FORMATION == "Test"){
+        new_robots_needed_ = false;
+        float robot_radius = globals.ROBOT_RADIUS;
+    }       
     
     // Create robots first
     for (auto robot : robots_to_create){
