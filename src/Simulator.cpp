@@ -378,7 +378,7 @@ void Simulator::eventHandler(){
 /*******************************************************************************/
 
 
-// Now We are in test branch.
+// Now We are in main branch.
 void Simulator::createOrDeleteRobots(){
     if (!new_robots_needed_) return;
 
