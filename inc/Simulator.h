@@ -136,6 +136,11 @@ public:
     // Handles keypresses and mouse input, and updates camera.
     /*******************************************************************************/
     void eventHandler();
+    
+    /*******************************************************************************/
+    // Print all robot trajectories to console
+    /*******************************************************************************/
+    void printTrajectories();
 
     /*******************************************************************************/
     // Deletes the robot from the simulator's robots_, as well as any variable/factors associated.

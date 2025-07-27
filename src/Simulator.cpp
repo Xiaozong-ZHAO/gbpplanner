@@ -411,3 +411,22 @@ void Simulator::drawObstacles() {
         DrawCylinderWires(position3D, radius, radius, 0.2f, 16, BLACK);
     }
 }
+
+/*******************************************************************************/
+// Print all robot trajectories to console
+/*******************************************************************************/
+void Simulator::printTrajectories() {
+    std::cout << "\n=== ROBOT TRAJECTORIES ===" << std::endl;
+    
+    for (auto [rid, robot] : robots_) {
+        std::cout << "\nRobot " << rid << " trajectory (" << robot->trajectory_.size() << " points):" << std::endl;
+        
+        for (size_t i = 0; i < robot->trajectory_.size(); i++) {
+            std::cout << "  Point " << i << ": (" 
+                      << robot->trajectory_[i].x() << ", " 
+                      << robot->trajectory_[i].y() << ")" << std::endl;
+        }
+    }
+    
+    std::cout << "\n=========================" << std::endl;
+}
