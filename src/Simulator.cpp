@@ -378,7 +378,7 @@ void Simulator::eventHandler(){
 /*******************************************************************************/
 
 
-// Now We are in main branch.
+// MAIN BRANCH MARKER.
 void Simulator::createOrDeleteRobots(){
     if (!new_robots_needed_) return;
 
