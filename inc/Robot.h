@@ -61,17 +61,9 @@ public:
 
     // Payload factors removed - only dynamics, interrobot, and obstacle factors are used
     
-    // 查询方法
-    bool isConnectedToPayload(int payload_id) const;
-    int getAssignedContactPointIndex() const { return assigned_contact_point_index_; }
-
-    void attachToPayload(std::shared_ptr<Payload> payload, const Eigen::Vector2d& attach_point);
-    void detachFromPayload();
-    bool isAttachedToPayload() const { return payload_joint_ != nullptr; }
     /****************************************/
     //Functions
     /****************************************/
-    void updateForPayload();
     void syncPhysicsToLogical();
     void syncLogicalToPhysics();
     void createPhysicsBody();

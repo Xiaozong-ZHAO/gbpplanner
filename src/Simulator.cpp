@@ -43,31 +43,6 @@ Simulator::Simulator(){
     loadObstacles();
     
 };
-
-std::map<int, std::shared_ptr<Payload>> Simulator::getPayload(){
-    return payloads_;
-}
-
-void Simulator::createPayload(Eigen::Vector2d position, float width, float height) {
-    auto payload = std::make_shared<Payload>(this, next_payload_id_++, position, width, height, globals.PAYLOAD_DENSITY);
-    payloads_[payload->payload_id_] = payload;
-    
-    // 计算绝对目标位置（基于相对位置）
-    Eigen::Vector2d target_position = Eigen::Vector2d(globals.TARGET_RELATIVE_X, globals.TARGET_RELATIVE_Y);
-    
-    // 设置目标位置
-    payload->setTarget(target_position);
-
-    // 设置目标朝向（如果payload支持）
-    // 关键修复：使用相对旋转设置目标朝向
-    if (std::abs(globals.TARGET_RELATIVE_ROTATION) > 0.001) {  // 如果有旋转目标
-        payload->setTargetFromRelativeRotation(globals.TARGET_RELATIVE_ROTATION);
-    } else {
-        // 如果没有旋转目标，目标朝向等于初始朝向
-        payload->target_orientation_ = payload->initial_orientation_;
-    }
-}
-
 /*******************************************************************************/
 // Destructor
 /*******************************************************************************/
@@ -102,11 +77,6 @@ void Simulator::draw(){
             // Draw Robots
             for (auto [rid, robot] : robots_) robot->draw();
             
-            // Draw Payloads
-            for (auto [pid, payload]: payloads_) {
-                payload->draw();
-            }
-            
             // Draw Obstacles
             drawObstacles();
 
@@ -118,56 +88,6 @@ void Simulator::draw(){
 /*******************************************************************************/
 // Timestep loop of simulator.
 /*******************************************************************************/
-bool Simulator::isRobotContactingPayload(int robot_id, int payload_id) {
-    // 获取机器人和payload的物理体
-    auto robot_it = robots_.find(robot_id);
-    auto payload_it = payloads_.find(payload_id);
-    
-    if (robot_it == robots_.end() || payload_it == payloads_.end()) {
-        return false; // 机器人或payload不存在
-    }
-    
-    b2Body* robot_body = robot_it->second->physicsBody_;
-    b2Body* payload_body = payload_it->second->physicsBody_;
-    
-    if (!robot_body || !payload_body) {
-        return false; // 物理体不存在
-    }
-    
-    // 遍历机器人的所有接触
-    for (b2ContactEdge* edge = robot_body->GetContactList(); edge; edge = edge->next) {
-        if (edge->other == payload_body && edge->contact->IsTouching()) {
-            return true; // 找到接触
-        }
-    }
-    
-    return false; // 没有接触
-}
-
-std::pair<Eigen::Vector2d, Eigen::Vector2d> Simulator::getContactPoint(int robot_id, int payload_id){
-    auto robot_it = robots_.find(robot_id);
-    auto payload_it = payloads_.find(payload_id);
-
-    b2Body* robot_body = robot_it->second->physicsBody_;
-    b2Body* payload_body = payload_it->second->physicsBody_;
-
-    for (b2ContactEdge *edge = robot_body->GetContactList(); edge; edge=edge->next){
-        b2WorldManifold worldManifold;
-        edge->contact->GetWorldManifold(&worldManifold);
-
-        b2Vec2 contactPoint = worldManifold.points[0];
-        Eigen::Vector2d point(contactPoint.x, contactPoint.y);
-        b2Vec2 normal = worldManifold.normal;
-        if (edge->contact->GetFixtureA()->GetBody() == robot_body) {
-            return {point, Eigen::Vector2d(normal.x, normal.y)};
-        } else{
-            return {point, Eigen::Vector2d(-normal.x, -normal.y)};
-        }
-    }
-    return {Eigen::Vector2d::Zero(), Eigen::Vector2d::Zero()};
-}
-
-
 Eigen::MatrixXd Simulator::Quat2Rot(Eigen::Quaterniond q) {
     Eigen::MatrixXd R(2, 2);
     R(0, 0) = q.w() * q.w() + q.x() *q.x() - q.y() * q.y() - q.z() * q.z();
@@ -176,12 +96,6 @@ Eigen::MatrixXd Simulator::Quat2Rot(Eigen::Quaterniond q) {
     R(1, 1) = q.w() * q.w() - q.x() * q.x() + q.y() * q.y() - q.z() * q.z();
     return R;
 }
-
-
-
-
-
-
 
 // Distributed GBP control only
 void Simulator::timestep() {
@@ -221,28 +135,11 @@ void Simulator::timestep() {
         robot->syncPhysicsToLogical();
     }
     
-    // Update payload states from physics
-    for (auto& [pid, payload] : payloads_) {
-        payload->update();
-    }
-    
     clock_++;
     if (clock_ >= globals.MAX_TIME) globals.RUN = false;
 }
 
-// 简化 updateDistributedPayloadControl()
-void Simulator::updateDistributedPayloadControl() {
-    // 简单的状态监控
-    for (auto& [pid, payload] : payloads_) {
-        int connected_robots = 0;
-        for (auto& [rid, robot] : robots_) {
-            if (robot->isConnectedToPayload(pid)) {
-                connected_robots++;
-            }
-        }
-        // std::cout << "Payload " << pid << " has " << connected_robots << " connected robots." << std::endl;
-    }
-}
+
 
 /*******************************************************************************/
 // Use a kd-tree to perform a radius search for neighbours of a robot within comms. range
@@ -384,98 +281,56 @@ void Simulator::createOrDeleteRobots(){
     std::vector<std::shared_ptr<Robot>> robots_to_create{};
     std::vector<std::shared_ptr<Robot>> robots_to_delete{};
     Eigen::VectorXd starting, turning, ending; // Waypoints : [x,y,xdot,ydot].
+    std::vector<Eigen::Vector2d> robot_start_pts;
+    std::vector<Eigen::Vector2d> robot_end_pts;
+
+    robot_start_pts.push_back(Eigen::Vector2d(1.0, 2.0));
+    robot_start_pts.push_back(Eigen::Vector2d(2.0, 2.0));
+    robot_start_pts.push_back(Eigen::Vector2d(4.0, 2.0));
+    robot_start_pts.push_back(Eigen::Vector2d(4.0, 2.0));
+
+    robot_end_pts.push_back(Eigen::Vector2d(12.0, 10.0));
+    robot_end_pts.push_back(Eigen::Vector2d(11.0, 11.0));
+    robot_end_pts.push_back(Eigen::Vector2d(6.0, 9.0));
+    robot_end_pts.push_back(Eigen::Vector2d(8.0, 14.0));
 
     if (globals.FORMATION == "Payload") {
         new_robots_needed_ = false;
         float robot_radius = globals.ROBOT_RADIUS;
         
-        // 获取payload信息createOrDelete
-        if (payloads_.empty()) return;
-        
-        auto payload = payloads_.begin()->second;
-
-        auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
-        Eigen::Vector2d payload_centroid = payload->getPosition();
-        Eigen::Vector2d payload_target = payload->getTarget();
-        Eigen::MatrixXd payload_R = Quat2Rot(payload->getTargetRotation());
-
-        std::cout << "Rotation matrix is" << payload_R << std::endl;
-        
-        if (contact_points.empty()) {
-            std::cout << "Warning: No contact points available for payload" << std::endl;
-            return;
-        }
-        
         // 为每个机器人分配一个接触点索引
         for (int i = 0; i < globals.NUM_ROBOTS; i++) {
-            int contact_point_index = i % contact_points.size();
-            
-            // 获取对应的接触点和法向量
-            Eigen::Vector2d contact_point = contact_points[contact_point_index];
-            Eigen::Vector2d contact_normal = contact_normals[contact_point_index];
-
-            Eigen::Vector2d dir = (contact_point - payload_centroid).normalized();
-
+            // first, let's hardcode the start and end positions
 
             // 机器人初始位置：接触点 - 机器人半径 * 法向量
-            Eigen::Vector2d robot_start_pos = contact_point + robot_radius * dir;
-            
+            Eigen::Vector2d robot_start_pos = robot_start_pts[i];
             Eigen::VectorXd starting(4);
             starting << robot_start_pos.x(), robot_start_pos.y(), 0.0, 0.0;
 
-            Eigen::Vector2d relative_r = payload_R * (contact_point - payload_centroid);
+            Eigen::Vector2d robot_end_pos = robot_end_pts[i];
 
             Eigen::VectorXd ending(4);
 
-            ending << payload_target.x() + relative_r.x(), 
-                    payload_target.y() + relative_r.y(),
+            ending << robot_end_pos.x(), 
+                    robot_end_pos.y(),
                     0.0, 0.0;
             // store the first 2 elements in ending to simulator::endings
             endings_.push_back(Eigen::Vector2d(ending(0), ending(1)));
 
             std::deque<Eigen::VectorXd> waypoints{starting, ending};
             
-            Color robot_color = ColorFromHSV(contact_point_index * 360.0f / contact_points.size(), 1.0f, 0.75f);
+            Color robot_color = ColorFromHSV(i * 360.0f / globals.NUM_ROBOTS, 1.0f, 0.75f);
             
             auto robot = std::make_shared<Robot>(this, next_rid_++, waypoints, robot_radius, robot_color, getPhysicsWorld());
-            
-            // 分配接触点索引
-            robot->assigned_contact_point_index_ = contact_point_index;
-            
             robots_to_create.push_back(robot);
-            
-            std::cout << "Robot " << robot->rid_ << " assigned to contact point " << contact_point_index 
-                      << " at position (" << contact_point.x() << ", " << contact_point.y() << ")" << std::endl;
         }
         
-    } else if (globals.FORMATION == "Test"){
-        new_robots_needed_ = false;
-        float robot_radius = globals.ROBOT_RADIUS;
-    }       
+    }     
     
     // Create robots first
     for (auto robot : robots_to_create){
         robot_positions_[robot->rid_] = std::vector<double>{robot->waypoints_[0](0), robot->waypoints_[0](1)};
         robots_[robot->rid_] = robot;
-    }
-
-    
-    
-    // 关键修改：可切换的刚性连接
-    if (globals.FORMATION == "Payload" && !payloads_.empty()) {
-        auto payload = payloads_.begin()->second;
-        auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
-        
-        if (globals.USE_RIGID_ATTACHMENT) {
-            // 启用刚性连接
-            for (auto robot : robots_to_create) {
-                int contact_index = robot->assigned_contact_point_index_;
-                if (contact_index < contact_points.size()) {
-                    Eigen::Vector2d attach_point = contact_points[contact_index];
-                    robot->attachToPayload(payload, attach_point);
-                }
-            }
-        }
     }
 
     locateNearbys(robots_);
@@ -497,15 +352,6 @@ void Simulator::deleteRobot(std::shared_ptr<Robot> robot){
     }
     robots_.erase(robot->rid_);
     robot_positions_.erase(robot->rid_);
-}
-
-void Simulator::deletePayload(int payload_id) {
-    payloads_.erase(payload_id);
-}
-
-std::shared_ptr<Payload> Simulator::getPayload(int payload_id) {
-    auto it = payloads_.find(payload_id);
-    return (it != payloads_.end()) ? it->second : nullptr;
 }
 
 /*******************************************************************************/

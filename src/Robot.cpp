@@ -50,78 +50,12 @@ Robot::Robot(Simulator* sim,
     Color var_color = color_; double sigma; int n = globals.N_DOFS;
     Eigen::VectorXd mu(n); Eigen::VectorXd sigma_list(n); 
 
-    const auto& payloads_ = sim->getPayload();
-
-    // Get payload information for rigid body interpolation
-    std::shared_ptr<Payload> payload = nullptr;
-    if (!payloads_.empty()) {
-        payload = payloads_.begin()->second;
-    }
-
     for (int i = 0; i < num_variables_; i++){
-        if (payload && globals.FORMATION == "Payload" && globals.T_HORIZON > 0) {
-            // Get local contact point coordinates first and validate
-            auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
-            
-            // Safe contact point index assignment
-            int safe_contact_index = 0;
-            if (!contact_points.empty()) {
-                safe_contact_index = rid_ % contact_points.size();
-            }
-            
-            if (contact_points.empty()) {
-                // Fallback to linear interpolation if no contact points
-                mu = start + (horizon - start) * (float)(variable_timesteps[i]/(float)variable_timesteps.back());
-            } else {
-                // Rigid body interpolation for payload formation
-                float t = (float)(variable_timesteps[i] * globals.T0 / globals.T_HORIZON);
-                
-                // Get payload motion parameters
-                Eigen::Vector2d P_start = payload->getPosition();
-                Eigen::Vector2d P_target = payload->getTarget();
-                Eigen::Quaterniond q_start = payload->current_orientation_;
-                Eigen::Quaterniond q_target = payload->getTargetRotation();
-                
-                // Convert quaternions to rotation angles
-                double θ_start = atan2(2.0 * (q_start.w() * q_start.z() + q_start.x() * q_start.y()),
-                                      1.0 - 2.0 * (q_start.y() * q_start.y() + q_start.z() * q_start.z()));
-                double θ_target = atan2(2.0 * (q_target.w() * q_target.z() + q_target.x() * q_target.y()),
-                                       1.0 - 2.0 * (q_target.y() * q_target.y() + q_target.z() * q_target.z()));
-                
-                // Interpolate payload state
-                Eigen::Vector2d P_t = P_start + (P_target - P_start) * t;
-                double θ_t = θ_start + (θ_target - θ_start) * t;
-                
-                // Use safe contact point index
-                Eigen::Vector2d contact_point = contact_points[safe_contact_index];
-                Eigen::Vector2d r_i = contact_point - P_start;
-                
-                // Rotation matrix at time t
-                Eigen::Matrix2d R_t;
-                R_t << cos(θ_t), -sin(θ_t),
-                       sin(θ_t),  cos(θ_t);
-                
-                // Robot position maintaining rigid body constraint
-                Eigen::Vector2d robot_pos_t = P_t + R_t * r_i;
-                
-                // Robot velocity from rigid body motion
-                double T_total = globals.T_HORIZON;
-                Eigen::Vector2d v_payload = (P_target - P_start) / T_total;
-                double ω_payload = (θ_target - θ_start) / T_total;
-                
-                Eigen::Vector2d r_i_rotated = R_t * r_i;
-                Eigen::Vector2d robot_vel_t = v_payload + ω_payload * Eigen::Vector2d(-r_i_rotated.y(), r_i_rotated.x());
-                
-                // Set complete 4-DOF state
-                mu << robot_pos_t.x(), robot_pos_t.y(), robot_vel_t.x(), robot_vel_t.y();
-            }
+        // Original linear interpolation for other formations
+        if (variable_timesteps.back() > 0) {
+            mu = start + (horizon - start) * (float)(variable_timesteps[i]/(float)variable_timesteps.back());
         } else {
-            // Original linear interpolation for other formations
-            if (variable_timesteps.back() > 0) {
-                mu = start + (horizon - start) * (float)(variable_timesteps[i]/(float)variable_timesteps.back());
-            } else {
-                mu = start;
-            }
+            mu = start;
         }
         
         // Start and Horizon state variables should be 'fixed' during optimisation at a timestep
@@ -181,60 +115,9 @@ Robot::Robot(Simulator* sim,
 /* Destructor */
 /***************************************************************************************************/
 Robot::~Robot(){
-    detachFromPayload();
 }
 
 // Robot.cpp 中的正确实现
-
-void Robot::attachToPayload(std::shared_ptr<Payload> payload, const Eigen::Vector2d& attach_point) {
-    if (!physicsBody_ || !payload->physicsBody_) {
-        std::cout << "Error: Cannot attach - missing physics bodies" << std::endl;
-        return;
-    }
-    
-    if (payload_joint_) {
-        detachFromPayload(); // 先断开现有连接
-    }
-    
-    // 创建焊接关节定义
-    b2WeldJointDef jointDef;
-    jointDef.bodyA = physicsBody_;           // 机器人
-    jointDef.bodyB = payload->physicsBody_;  // payload
-    
-    // 设置连接点（局部坐标）
-    jointDef.localAnchorA = physicsBody_->GetLocalPoint(b2Vec2(attach_point.x(), attach_point.y()));
-    jointDef.localAnchorB = payload->physicsBody_->GetLocalPoint(b2Vec2(attach_point.x(), attach_point.y()));
-
-    
-    
-    // 设置相对角度（保持当前相对角度）
-    jointDef.referenceAngle = payload->physicsBody_->GetAngle() - physicsBody_->GetAngle();
-    
-    // 使用正确的参数名
-    // jointDef.stiffness = std::numeric_limits<float>::max();  // 刚度 (N*m) - 数值越大越"硬"
-    // jointDef.damping = std::numeric_limits<float>::max();     // 阻尼 (N*m*s) - 防止震荡
-    jointDef.stiffness = 1;  // 刚度 (N*m) - 数值越大越"硬"
-    jointDef.damping = 0;     // 阻尼 (N*m*s) - 防止震荡
-    
-    // 创建关节
-    payload_joint_ = (b2WeldJoint*)physicsWorld_->CreateJoint(&jointDef);
-}
-
-void Robot::detachFromPayload() {
-    if (payload_joint_ && physicsWorld_) {
-        physicsWorld_->DestroyJoint(payload_joint_);
-        payload_joint_ = nullptr;
-        std::cout << "Robot " << rid_ << " detached from payload" << std::endl;
-    }
-}
-
-
-
-bool Robot::isConnectedToPayload(int payload_id) const {
-    return std::find(connected_payload_ids_.begin(), connected_payload_ids_.end(), payload_id) 
-           != connected_payload_ids_.end();
-}
-
 
 void Robot::createPhysicsBody(){
 
@@ -273,10 +156,6 @@ void Robot::createPhysicsBody(){
 /***************************************************************************************************/
 /* Change the prior of the Current state */
 /***************************************************************************************************/
-
-void updateForPayload(){
-    
-}
 
 void Robot::updateCurrent(){
     // Move plan: move plan current state by plan increment
