@@ -377,7 +377,7 @@ void Simulator::eventHandler(){
 // by appending (push_back()) a shared pointer to a Robot class.
 /*******************************************************************************/
 
-
+// TEST BRANCH MARKER
 void Simulator::createOrDeleteRobots(){
     if (!new_robots_needed_) return;
 
