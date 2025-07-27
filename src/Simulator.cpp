@@ -403,12 +403,11 @@ void Simulator::drawObstacles() {
         float x = static_cast<float>(obstacle.position.x());
         float y = static_cast<float>(obstacle.position.y());
         float radius = obstacle.radius;
-        float height = 8.0f; // Make obstacles taller for better visibility
         
-        Vector3 position3D = {x, height / 2.0f, y};
+        Vector3 position3D = {x, 0.1f, y}; // Draw at ground level
         
-        // Draw cylinder for obstacle with bright red color for visibility
-        DrawCylinder(position3D, radius, radius, height, 16, RED);
-        DrawCylinderWires(position3D, radius, radius, height, 16, BLACK);
+        // Draw 2D circle as a thin disk
+        DrawCylinder(position3D, radius, radius, 0.2f, 16, RED);
+        DrawCylinderWires(position3D, radius, radius, 0.2f, 16, BLACK);
     }
 }
