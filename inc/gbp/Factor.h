@@ -138,7 +138,7 @@ class ObsFactor: public Factor {
     Eigen::Vector2d obs_pos_;
     Eigen::Vector2d r_;
     float obstacle_radius_;
-    float payload_radius_;
+    float robot_radius_;
     int o_id_;
     float padding_;
     float d_;

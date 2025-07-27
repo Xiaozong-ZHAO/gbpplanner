@@ -4,7 +4,7 @@
   
   "#": "Display parameters",
   "DISPLAY": 1,
-  "WORLD_SZ": 200,
+  "WORLD_SZ": 100,
   "SCREEN_SZ": 1000,
   "DRAW_INTERROBOT": 0,
   "DRAW_PATH": 0,
@@ -16,7 +16,7 @@
   "MAX_TIME": 10000,
   "NUM_ROBOTS": 4,
   "T_HORIZON": 10,
-  "ROBOT_RADIUS": 1,
+  "ROBOT_RADIUS": 0.5,
   "COMMUNICATION_RADIUS": 20,
   "MAX_SPEED": 5.0,
   "COMMS_FAILURE_RATE": 0,

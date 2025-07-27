@@ -35,9 +35,6 @@ Simulator::Simulator(){
     // However for calculation purposes the image needs to be inverted.
     ImageColorInvert(&obstacleImg);
     graphics = new Graphics(obstacleImg);
-
-    Eigen::Vector2d starting_position = Eigen::Vector2d(globals.STARTING_X, globals.STARTING_Y);
-    createPayload(starting_position, globals.PAYLOAD_WIDTH, globals.PAYLOAD_HEIGHT);
     
     // Load obstacles from JSON file
     loadObstacles();
@@ -100,9 +97,6 @@ Eigen::MatrixXd Simulator::Quat2Rot(Eigen::Quaterniond q) {
 // Distributed GBP control only
 void Simulator::timestep() {
     if (globals.SIM_MODE != Timestep) return;
-    
-    // Use distributed GBP control
-    updateDistributedPayloadControl();
     
     calculateRobotNeighbours(robots_);
     
@@ -284,15 +278,15 @@ void Simulator::createOrDeleteRobots(){
     std::vector<Eigen::Vector2d> robot_start_pts;
     std::vector<Eigen::Vector2d> robot_end_pts;
 
-    robot_start_pts.push_back(Eigen::Vector2d(1.0, 2.0));
-    robot_start_pts.push_back(Eigen::Vector2d(2.0, 2.0));
-    robot_start_pts.push_back(Eigen::Vector2d(4.0, 2.0));
-    robot_start_pts.push_back(Eigen::Vector2d(4.0, 2.0));
+    robot_start_pts.push_back(Eigen::Vector2d(1.0, -2.0));
+    robot_start_pts.push_back(Eigen::Vector2d(2.0, -2.0));
+    robot_start_pts.push_back(Eigen::Vector2d(4.0, -2.0));
+    robot_start_pts.push_back(Eigen::Vector2d(4.0, -2.0));
 
-    robot_end_pts.push_back(Eigen::Vector2d(12.0, 10.0));
-    robot_end_pts.push_back(Eigen::Vector2d(11.0, 11.0));
-    robot_end_pts.push_back(Eigen::Vector2d(6.0, 9.0));
-    robot_end_pts.push_back(Eigen::Vector2d(8.0, 14.0));
+    robot_end_pts.push_back(Eigen::Vector2d(12.0, -10.0));
+    robot_end_pts.push_back(Eigen::Vector2d(11.0, -11.0));
+    robot_end_pts.push_back(Eigen::Vector2d(6.0, -9.0));
+    robot_end_pts.push_back(Eigen::Vector2d(8.0, -14.0));
 
     if (globals.FORMATION == "Payload") {
         new_robots_needed_ = false;
