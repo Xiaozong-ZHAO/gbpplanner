@@ -232,6 +232,7 @@ void Simulator::eventHandler(){
     switch (key)
     {
     case KEY_ESCAPE:
+            printTrajectories();
             globals.RUN = false;                                                    break;
     case KEY_H:
             globals.LAST_SIM_MODE = (globals.SIM_MODE==Help) ? globals.LAST_SIM_MODE : globals.SIM_MODE;
@@ -281,7 +282,7 @@ void Simulator::createOrDeleteRobots(){
     robot_start_pts.push_back(Eigen::Vector2d(1.0, -2.0));
     robot_start_pts.push_back(Eigen::Vector2d(2.0, -2.0));
     robot_start_pts.push_back(Eigen::Vector2d(4.0, -2.0));
-    robot_start_pts.push_back(Eigen::Vector2d(4.0, -2.0));
+    robot_start_pts.push_back(Eigen::Vector2d(6.0, -2.0));
 
     robot_end_pts.push_back(Eigen::Vector2d(12.0, -10.0));
     robot_end_pts.push_back(Eigen::Vector2d(11.0, -11.0));
