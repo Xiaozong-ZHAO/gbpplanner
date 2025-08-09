@@ -254,105 +254,84 @@ Eigen::Vector2d Payload::getVelocity() const {
     return Eigen::Vector2d::Zero();
 }
 
-std::pair<std::vector<Eigen::Vector2d>, std::vector<Eigen::Vector2d>> Payload::getContactPointsAndNormals() const {
-    std::vector<Eigen::Vector2d> contact_points;
-    std::vector<Eigen::Vector2d> contact_normals;
+std::pair<std::vector<Eigen::Vector2d>, std::vector<Eigen::Vector2d>>
+Payload::getContactPointsAndNormals() const {
+    using std::vector;
+    using Eigen::Vector2d;
+    using Eigen::Matrix2d;
 
-    // For 4 robots: place them at the middle of each edge
-    if (globals.NUM_ROBOTS == 4) {
-        // Define local contact points (relative to payload center)
-        std::vector<Eigen::Vector2d> local_contact_points = {
-            Eigen::Vector2d(0, globals.PAYLOAD_HEIGHT/2),          // Top edge (middle)
-            Eigen::Vector2d(globals.PAYLOAD_WIDTH/2, 0),           // Right edge (middle)
-            Eigen::Vector2d(0, -globals.PAYLOAD_HEIGHT/2),         // Bottom edge (middle)
-            Eigen::Vector2d(-globals.PAYLOAD_WIDTH/2, 0)           // Left edge (middle)
-        };
-        
-        // Define corresponding outward normals
-        std::vector<Eigen::Vector2d> local_normals = {
-            Eigen::Vector2d(0, 1),   // Top edge normal
-            Eigen::Vector2d(1, 0),   // Right edge normal
-            Eigen::Vector2d(0, -1),  // Bottom edge normal
-            Eigen::Vector2d(-1, 0)   // Left edge normal
-        };
+    const double W = static_cast<double>(globals.PAYLOAD_WIDTH);
+    const double H = static_cast<double>(globals.PAYLOAD_HEIGHT);
+    const int N = globals.NUM_ROBOTS;
+    const double P = 2.0 * (W + H);
 
-        // Transform to world coordinates
-        Eigen::Matrix2d rotation_matrix;
-        rotation_matrix << cos(rotation_), -sin(rotation_),
-                          sin(rotation_),  cos(rotation_);
-        
-        for (int k = 0; k < 4; k++) {
-            Eigen::Vector2d world_contact_point = position_ + rotation_matrix * local_contact_points[k];
-            Eigen::Vector2d world_normal = rotation_matrix * local_normals[k];
-            
-            contact_points.push_back(world_contact_point);
-            contact_normals.push_back(world_normal);
-        }
-    } else {
-        // Fallback: original perimeter distribution for other robot counts
-        float perimeter = 2 * (globals.PAYLOAD_HEIGHT + globals.PAYLOAD_WIDTH);
-        float delta = perimeter / globals.NUM_ROBOTS;
+    vector<Vector2d> contact_points;
+    vector<Vector2d> contact_normals;
+    contact_points.reserve(N);
+    contact_normals.reserve(N);
 
-        for (int k = 0; k < globals.NUM_ROBOTS; k++) {
-            float dist = k * delta;
-            Eigen::Vector2d contact_point;
-            Eigen::Vector2d normal;
-            
-            if (dist < globals.PAYLOAD_WIDTH) {
-                // Top edge: x varies from -width/2 to +width/2, y = +height/2
-                contact_point = Eigen::Vector2d(
-                    -globals.PAYLOAD_WIDTH/2 + dist,
-                    globals.PAYLOAD_HEIGHT/2
-                );
-                normal = Eigen::Vector2d(0, 1);  // Outward normal
+    if (N <= 0 || P <= 0.0) {
+        return {contact_points, contact_normals};
+    }
 
-            } else if (dist < globals.PAYLOAD_WIDTH + globals.PAYLOAD_HEIGHT) {
-                // Right edge: x = +width/2, y varies from +height/2 to -height/2
-                float edge_dist = dist - globals.PAYLOAD_WIDTH;
-                contact_point = Eigen::Vector2d(
-                    globals.PAYLOAD_WIDTH/2,
-                    globals.PAYLOAD_HEIGHT/2 - edge_dist
-                );
-                normal = Eigen::Vector2d(1, 0);  // Outward normal
+    // 四条边长度：上、右、下、左（与你原本的顺序一致）
+    std::array<double,4> L = { W, H, W, H };
 
-            } else if (dist < 2 * globals.PAYLOAD_WIDTH + globals.PAYLOAD_HEIGHT) {
-                // Bottom edge: x varies from +width/2 to -width/2, y = -height/2
-                float edge_dist = dist - globals.PAYLOAD_WIDTH - globals.PAYLOAD_HEIGHT;
-                contact_point = Eigen::Vector2d(
-                    globals.PAYLOAD_WIDTH/2 - edge_dist,
-                    -globals.PAYLOAD_HEIGHT/2
-                );
-                normal = Eigen::Vector2d(0, -1);  // Outward normal
+    // Hamilton apportionment：先取 floor，再按小数部分从大到小补齐到 N
+    std::array<double,4> q;
+    std::array<int,4> n{};
+    int baseSum = 0;
+    for (int e = 0; e < 4; ++e) {
+        q[e] = (static_cast<double>(N) * L[e]) / P;
+        n[e] = static_cast<int>(std::floor(q[e]));
+        baseSum += n[e];
+    }
+    int R = N - baseSum;
+    // 给小数部分大的边先+1
+    std::array<int,4> idx = {0,1,2,3};
+    std::sort(idx.begin(), idx.end(),
+        [&](int a, int b){ return (q[a] - std::floor(q[a])) > (q[b] - std::floor(q[b])); });
+    for (int i = 0; i < R; ++i) n[idx[i % 4]]++;
 
-            } else if (dist < 2 * globals.PAYLOAD_WIDTH + 2 * globals.PAYLOAD_HEIGHT) {
-                // Left edge: x = -width/2, y varies from -height/2 to +height/2
-                float edge_dist = dist - 2 * globals.PAYLOAD_WIDTH - globals.PAYLOAD_HEIGHT;
-                contact_point = Eigen::Vector2d(
-                    -globals.PAYLOAD_WIDTH/2,
-                    -globals.PAYLOAD_HEIGHT/2 + edge_dist
-                );
-                normal = Eigen::Vector2d(-1, 0);  // Outward normal
+    // 旋转和平移到世界系
+    Matrix2d Rmat;
+    Rmat << std::cos(rotation_), -std::sin(rotation_),
+            std::sin(rotation_),  std::cos(rotation_);
 
-            } else {
-                std::cout << "Error: Contact point distance exceeds payload perimeter." << std::endl;
-                return {contact_points, contact_normals};
-            }
-            
-            // Transform contact point and normal to world coordinates
-            Eigen::Matrix2d rotation_matrix;
-            rotation_matrix << cos(rotation_), -sin(rotation_),
-                              sin(rotation_),  cos(rotation_);
-            
-            Eigen::Vector2d world_contact_point = position_ + rotation_matrix * contact_point;
-            Eigen::Vector2d world_normal = rotation_matrix * normal;
-            
-            contact_points.push_back(world_contact_point);
-            contact_normals.push_back(world_normal);
-        }
+    auto emit = [&](const Vector2d& local_pt, const Vector2d& local_n){
+        contact_points.push_back(position_ + Rmat * local_pt);
+        contact_normals.push_back(Rmat * local_n); // 法线只旋转不平移
+    };
+
+    // 逐边生成：每边 i=1..n[e]，t = i/(n[e]+1) ∈ (0,1)，严格避开端点
+    // 上边：y=+H/2，x: -W/2 -> +W/2，法线(0,1)
+    for (int i = 1; i <= n[0]; ++i) {
+        double t = static_cast<double>(i) / (n[0] + 1);
+        Vector2d p(-W/2.0 + t*W,  H/2.0);
+        emit(p, Vector2d(0, 1));
+    }
+    // 右边：x=+W/2，y: +H/2 -> -H/2，法线(1,0)
+    for (int i = 1; i <= n[1]; ++i) {
+        double t = static_cast<double>(i) / (n[1] + 1);
+        Vector2d p( W/2.0,  H/2.0 - t*H);
+        emit(p, Vector2d(1, 0));
+    }
+    // 下边：y=-H/2，x: +W/2 -> -W/2，法线(0,-1)
+    for (int i = 1; i <= n[2]; ++i) {
+        double t = static_cast<double>(i) / (n[2] + 1);
+        Vector2d p( W/2.0 - t*W, -H/2.0);
+        emit(p, Vector2d(0, -1));
+    }
+    // 左边：x=-W/2，y: -H/2 -> +H/2，法线(-1,0)
+    for (int i = 1; i <= n[3]; ++i) {
+        double t = static_cast<double>(i) / (n[3] + 1);
+        Vector2d p(-W/2.0, -H/2.0 + t*H);
+        emit(p, Vector2d(-1, 0));
     }
 
     return {contact_points, contact_normals};
 }
+
 
 // std::pair<std::vector<Eigen::Vector2d>, std::vector<Eigen::Vector2d>> Payload::getContactPointsAndNormals() const {
 //     std::vector<Eigen::Vector2d> points;

@@ -305,11 +305,11 @@ void Robot::updateCurrent(){
 void Robot::syncLogicalToPhysics(){
     if (!usePhysics_ || !physicsBody_) return;
     
-    physicsBody_->SetTransform(b2Vec2(position_(0), position_(1)), 0.0f);
+    // physicsBody_->SetTransform(b2Vec2(position_(0), position_(1)), 0.0f);
     Eigen::VectorXd increment = ((*this)[1]->mu_ - (*this)[0]->mu_) * globals.TIMESTEP / globals.T0;
     b2Vec2 desiredVel(getVar(0)->mu_(2), getVar(0)->mu_(3));
 
-    // physicsBody_->SetLinearVelocity(desiredVel);
+    physicsBody_->SetLinearVelocity(desiredVel);
 }
 
 void Robot::syncPhysicsToLogical(){
