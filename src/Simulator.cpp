@@ -419,7 +419,7 @@ void Simulator::createOrDeleteRobots(){
 
 
             // 机器人初始位置：接触点 - 机器人半径 * 法向量
-            Eigen::Vector2d robot_start_pos = contact_point + robot_radius * dir;
+            Eigen::Vector2d robot_start_pos = contact_point;
             
             Eigen::VectorXd starting(4);
             starting << robot_start_pos.x(), robot_start_pos.y(), 0.0, 0.0;

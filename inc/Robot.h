@@ -51,6 +51,7 @@ public:
     Image* p_obstacleImage;                     // Pointer to image representing the obstacles in the environment
     float height_3D_ = 0.f;                     // Height out of plane (for 3d visualisation only)
     Eigen::VectorXd position_;                  // Position of the robot (equivalent to taking the [x,y] of the current state of the robot)
+    std::vector<Eigen::Vector2d> trajectory_;   // Trajectory history for visualization
     
     std::vector<int> connected_payload_ids_;       // 类似connected_r_ids_
     int assigned_contact_point_index_;             // 分配的接触点索引（而不是坐标）

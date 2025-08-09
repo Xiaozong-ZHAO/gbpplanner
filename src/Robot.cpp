@@ -30,6 +30,9 @@ Robot::Robot(Simulator* sim,
     Eigen::VectorXd start = position_ = waypoints_[0];
     waypoints_.pop_front();                             
     auto goal = (waypoints_.size()>0) ? waypoints_[0] : start;
+    
+    // Initialize trajectory with starting position
+    trajectory_.push_back(Eigen::Vector2d(start(0), start(1)));
 
     if (usePhysics_ && physicsWorld_) {
         createPhysicsBody();
@@ -212,9 +215,9 @@ void Robot::attachToPayload(std::shared_ptr<Payload> payload, const Eigen::Vecto
     
     // 使用正确的参数名
     // jointDef.stiffness = std::numeric_limits<float>::max();  // 刚度 (N*m) - 数值越大越"硬"
-    // jointDef.damping = std::numeric_limits<float>::max();     // 阻尼 (N*m*s) - 防止震荡
-    jointDef.stiffness = 1;  // 刚度 (N*m) - 数值越大越"硬"
-    jointDef.damping = 0;     // 阻尼 (N*m*s) - 防止震荡
+    // jointDef.damping = 1000;     // 阻尼 (N*m*s) - 防止震荡
+    jointDef.stiffness = 10000;  // 刚度 (N*m) - 数值越大越"硬"
+    jointDef.damping = 10000;     // 阻尼 (N*m*s) - 防止震荡
     
     // 创建关节
     payload_joint_ = (b2WeldJoint*)physicsWorld_->CreateJoint(&jointDef);
@@ -286,6 +289,14 @@ void Robot::updateCurrent(){
     // Real pose update
     position_ = position_ + increment;
     
+    // Track trajectory for visualization
+    trajectory_.push_back(Eigen::Vector2d(position_(0), position_(1)));
+    
+    // Limit trajectory length to prevent memory issues
+    if (trajectory_.size() > 1000) {
+        trajectory_.erase(trajectory_.begin());
+    }
+    
     // // Update physics body state to match logical state
     // print the position_(2) and position_(3) values
     syncLogicalToPhysics();
@@ -294,11 +305,11 @@ void Robot::updateCurrent(){
 void Robot::syncLogicalToPhysics(){
     if (!usePhysics_ || !physicsBody_) return;
     
-    // physicsBody_->SetTransform(b2Vec2(position_(0), position_(1)), 0.0f);
+    physicsBody_->SetTransform(b2Vec2(position_(0), position_(1)), 0.0f);
     Eigen::VectorXd increment = ((*this)[1]->mu_ - (*this)[0]->mu_) * globals.TIMESTEP / globals.T0;
     b2Vec2 desiredVel(getVar(0)->mu_(2), getVar(0)->mu_(3));
 
-    physicsBody_->SetLinearVelocity(desiredVel);
+    // physicsBody_->SetLinearVelocity(desiredVel);
 }
 
 void Robot::syncPhysicsToLogical(){
@@ -434,6 +445,19 @@ void Robot::draw(){
             DrawCubeV(Vector3{(float)waypoints_[wp_idx](0), height_3D_, (float)waypoints_[wp_idx](1)}, Vector3{1.f*robot_radius_,1.f*robot_radius_,1.f*robot_radius_}, col);
         }
     }
+    
+    // Draw trajectory history in robot's own color
+    if (globals.DRAW_PATH && trajectory_.size() > 1) {
+        Color trail_color = ColorAlpha(col, 0.8f);
+        
+        for (size_t i = 1; i < trajectory_.size(); i++) {
+            Vector3 start = {(float)trajectory_[i-1].x(), 0.1f, (float)trajectory_[i-1].y()};
+            Vector3 end = {(float)trajectory_[i].x(), 0.1f, (float)trajectory_[i].y()};
+            
+            DrawCylinderEx(start, end, 0.05f, 0.05f, 4, trail_color);
+        }
+    }
+
     // Draw the actual position of the robot. This uses the robotModel defined in Graphics.cpp, others can be used.
     DrawModel(sim_->graphics->robotModel_, Vector3{(float)position_(0), height_3D_, (float)position_(1)}, robot_radius_, col);
 };
