@@ -24,7 +24,7 @@ def create_distance_field(img):
         img = cv2.resize(img, (1000, 1000))
 
     # Convolve with a Gaussian to effect a blur.
-    blur = gaussian_filter(img, sigma=5)
+    blur = gaussian_filter(img, sigma=0.0)
     blur = cv2.normalize(blur, None, 0, 1.0, cv2.NORM_MINMAX, dtype=cv2.CV_32F)
     
     distance_field = blur
