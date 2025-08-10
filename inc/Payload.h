@@ -46,6 +46,7 @@ class Payload {
     // update and draw functions
     void update();
     void draw();
+    void drawOrientationHistory();
     
     // Create the physical entity
     void createPhysicsBody(float density);
@@ -76,6 +77,7 @@ class Payload {
     private:
         Simulator* sim_;
         std::vector<Eigen::Vector2d> trajectory_history_;
+        std::vector<double> orientation_history_;
         static const size_t MAX_TRAJECTORY_POINTS = 1000;
 };
 

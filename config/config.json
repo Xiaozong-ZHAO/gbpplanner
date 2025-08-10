@@ -9,6 +9,7 @@
   "DRAW_INTERROBOT": 0,
   "DRAW_PATH": 0,
   "DRAW_WAYPOINTS": 0,
+  "DRAW_PAYLOAD_ORIENTATION_HISTORY": 1,
   
   "##": "Simulation parameters",
   "SEED": 0.5,

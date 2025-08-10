@@ -40,6 +40,7 @@ class Globals {
     bool DRAW_INTERROBOT;                                   // Toggle display of inter-robot connections
     bool DRAW_PATH;                                         // Toggle display of planned paths
     bool DRAW_WAYPOINTS;                                    // Toggle display of path planning goals
+    bool DRAW_PAYLOAD_ORIENTATION_HISTORY;                 // Toggle display of payload orientation history
     
     // Simulation parameters
     int SEED;                                               // Random Seed 

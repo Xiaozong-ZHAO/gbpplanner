@@ -1,12 +1,12 @@
 #include <Payload.h>
 #include <Simulator.h>
-// #include <Globals.h>
+#include <Globals.h>
 
 #include <raylib.h>
 #include <raymath.h>  // 数学函数
 #include <rlgl.h>     // 低级OpenGL包装函数
 
-// extern Globals globals;
+extern Globals globals;
 
 Payload::Payload(Simulator* sim,
                  int payload_id,
@@ -30,6 +30,8 @@ Payload::Payload(Simulator* sim,
     velocity_(Eigen::Vector2d::Zero()) {
         trajectory_history_.reserve(MAX_TRAJECTORY_POINTS);
         trajectory_history_.push_back(initial_position);
+        orientation_history_.reserve(MAX_TRAJECTORY_POINTS);
+        orientation_history_.push_back(0.0); // Initial orientation is 0
         physicsWorld_ = sim->getPhysicsWorld();
         if (physicsWorld_){
             createPhysicsBody(density);
@@ -88,11 +90,13 @@ void Payload::update() {
         // 正确更新current_orientation_
         current_orientation_ = Eigen::Quaterniond(cos(rotation_/2), 0, 0, sin(rotation_/2));
         
-        // Record trajectory
+        // Record trajectory and orientation
         if (trajectory_history_.size() >= MAX_TRAJECTORY_POINTS) {
             trajectory_history_.erase(trajectory_history_.begin());
+            orientation_history_.erase(orientation_history_.begin());
         }
         trajectory_history_.push_back(position_);
+        orientation_history_.push_back(rotation_);
     }
 }
 
@@ -122,6 +126,11 @@ void Payload::draw() {
             Vector3 end = {static_cast<float>(trajectory_history_[i].x()), 0.1f, static_cast<float>(trajectory_history_[i].y())};
             DrawLine3D(start, end, ColorAlpha(BLUE, 0.7f));
         }
+    }
+    
+    // Draw orientation history
+    if (globals.DRAW_PAYLOAD_ORIENTATION_HISTORY) {
+        drawOrientationHistory();
     }
     Vector3 position3D = {x, 0.5f, y};
     Vector3 size = {width_, 1.0f, height_};
@@ -382,4 +391,50 @@ double Payload::getRotationFromQuaternion(const Eigen::Quaterniond& q) const {
     // 从四元数提取Z轴旋转角度（2D旋转）
     return atan2(2.0 * (normalized_q.w() * normalized_q.z() + normalized_q.x() * normalized_q.y()), 
                  1.0 - 2.0 * (normalized_q.y() * normalized_q.y() + normalized_q.z() * normalized_q.z()));
+}
+
+void Payload::drawOrientationHistory() {
+    if (trajectory_history_.size() != orientation_history_.size()) {
+        return; // Safety check - histories should have same size
+    }
+    
+    // Skip drawing if history is too short
+    if (trajectory_history_.size() < 2) {
+        return;
+    }
+    
+    // Scale down the historical payload shapes (30% of original size)
+    const float scale = 0.3f;
+    Vector3 scaled_size = {width_ * scale, 0.2f, height_ * scale};
+    
+    // Draw every Nth point to avoid overcrowding (adjust as needed)
+    const int step = std::max(1, static_cast<int>(trajectory_history_.size() / 50));
+    
+    for (int i = 0; i < trajectory_history_.size(); i += step) {
+        // Skip the most recent point (it's drawn as the main payload)
+        if (i >= trajectory_history_.size() - 1) continue;
+        
+        // Calculate alpha for fading effect (newer = more opaque)
+        float alpha = 0.1f + 0.4f * (static_cast<float>(i) / trajectory_history_.size());
+        
+        // Position in 3D space (slightly above ground)
+        Vector3 pos3D = {
+            static_cast<float>(trajectory_history_[i].x()), 
+            0.05f, 
+            static_cast<float>(trajectory_history_[i].y())
+        };
+        
+        // Get orientation at this point
+        float hist_rotation = orientation_history_[i];
+        
+        // Color with alpha fading
+        Color hist_color = ColorAlpha(BLUE, alpha);
+        
+        // Draw oriented cube at historical position
+        rlPushMatrix();
+        rlTranslatef(pos3D.x, pos3D.y, pos3D.z);
+        rlRotatef(-hist_rotation * RAD2DEG, 0, 1, 0);
+        DrawCube({0, 0, 0}, scaled_size.x, scaled_size.y, scaled_size.z, hist_color);
+        rlPopMatrix();
+    }
 }

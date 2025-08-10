@@ -23,6 +23,7 @@ void Globals::parse_global_args(std::ifstream& config_file){
     DRAW_INTERROBOT = static_cast<bool>((int)j["DRAW_INTERROBOT"]);
     DRAW_PATH = static_cast<bool>((int)j["DRAW_PATH"]);
     DRAW_WAYPOINTS = static_cast<bool>((int)j["DRAW_WAYPOINTS"]);
+    DRAW_PAYLOAD_ORIENTATION_HISTORY = static_cast<bool>((int)j["DRAW_PAYLOAD_ORIENTATION_HISTORY"]);
 
     // Simulation parameters
     SEED = j["SEED"];
