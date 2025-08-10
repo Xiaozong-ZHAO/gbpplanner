@@ -13,6 +13,7 @@
 #include "box2d/box2d.h"
 #include "json.hpp"
 
+extern Globals globals;
 
 /*******************************************************************************/
 // Raylib setup
@@ -42,6 +43,10 @@ Simulator::Simulator(){
     // Load obstacles from JSON file
     loadObstacles();
     
+    // Initialize CSV export if enabled
+    if (globals.EXPORT_TRAJECTORY_DATA) {
+        initCSVExport();
+    }
 };
 
 std::map<int, std::shared_ptr<Payload>> Simulator::getPayload(){
@@ -79,6 +84,12 @@ Simulator::~Simulator(){
     if(physicsWorld_) {
         delete physicsWorld_;
         physicsWorld_ = nullptr;
+    }
+
+    // Close CSV file if it was opened
+    if (trajectory_csv_file_.is_open()) {
+        trajectory_csv_file_.close();
+        std::cout << "CSV export completed and file closed" << std::endl;
     }
 
     if (globals.DISPLAY) {
@@ -225,6 +236,9 @@ void Simulator::timestep() {
     for (auto& [pid, payload] : payloads_) {
         payload->update();
     }
+    
+    // Export payload trajectory data to CSV
+    exportPayloadTrajectory();
     
     clock_++;
     if (clock_ >= globals.MAX_TIME) globals.RUN = false;
@@ -572,4 +586,36 @@ void Simulator::drawObstacles() {
         DrawCylinder(position3D, radius, radius, height, 16, RED);
         DrawCylinderWires(position3D, radius, radius, height, 16, BLACK);
     }
+}
+
+void Simulator::initCSVExport() {
+    trajectory_csv_file_.open("payload_trajectory.csv");
+    if (trajectory_csv_file_.is_open()) {
+        // Write header row
+        trajectory_csv_file_ << "payload_x,payload_y,payload_orientation" << std::endl;
+        std::cout << "CSV export initialized: payload_trajectory.csv" << std::endl;
+    } else {
+        std::cerr << "Error: Could not create CSV file for trajectory export" << std::endl;
+    }
+}
+
+void Simulator::exportPayloadTrajectory() {
+    if (!globals.EXPORT_TRAJECTORY_DATA || !trajectory_csv_file_.is_open()) {
+        return;
+    }
+    
+    if (payloads_.empty()) {
+        return;
+    }
+    
+    // Get the first (and likely only) payload
+    auto payload = payloads_.begin()->second;
+    
+    // Write payload data to CSV
+    trajectory_csv_file_ << payload->position_.x() << ","
+                        << payload->position_.y() << ","
+                        << payload->rotation_ << std::endl;
+    
+    // Flush to ensure data is written immediately
+    trajectory_csv_file_.flush();
 }

@@ -41,6 +41,7 @@ class Globals {
     bool DRAW_PATH;                                         // Toggle display of planned paths
     bool DRAW_WAYPOINTS;                                    // Toggle display of path planning goals
     bool DRAW_PAYLOAD_ORIENTATION_HISTORY;                 // Toggle display of payload orientation history
+    bool EXPORT_TRAJECTORY_DATA;                           // Toggle CSV export of payload trajectory data
     
     // Simulation parameters
     int SEED;                                               // Random Seed 

@@ -24,6 +24,7 @@ void Globals::parse_global_args(std::ifstream& config_file){
     DRAW_PATH = static_cast<bool>((int)j["DRAW_PATH"]);
     DRAW_WAYPOINTS = static_cast<bool>((int)j["DRAW_WAYPOINTS"]);
     DRAW_PAYLOAD_ORIENTATION_HISTORY = static_cast<bool>((int)j["DRAW_PAYLOAD_ORIENTATION_HISTORY"]);
+    EXPORT_TRAJECTORY_DATA = static_cast<bool>((int)j["EXPORT_TRAJECTORY_DATA"]);
 
     // Simulation parameters
     SEED = j["SEED"];
@@ -72,7 +73,27 @@ void Globals::parse_global_args(std::ifstream& config_file){
 
 }
 
-Globals::Globals(){};
+Globals::Globals(){
+    // Set default values for essential parameters
+    EXPORT_TRAJECTORY_DATA = true;  // Default CSV export to enabled
+    DISPLAY = false;                 // Default to no display for headless mode
+    NUM_ROBOTS = 4;                  // Default number of robots
+    TIMESTEP = 0.1;                  // Default timestep
+    T_HORIZON = 10;                  // Default horizon
+    MAX_TIME = 1000;                 // Default max time
+    PAYLOAD_WIDTH = 10.0;            // Default payload dimensions
+    PAYLOAD_HEIGHT = 10.0;
+    PAYLOAD_DENSITY = 0.01;
+    STARTING_X = -20.0;              // Default starting position
+    STARTING_Y = 0.0;
+    TARGET_RELATIVE_X = 30.0;        // Default target
+    TARGET_RELATIVE_Y = -5.0;
+    TARGET_RELATIVE_ROTATION = 1.5;
+    NUM_ITERS = 10;                  // Default GBP iterations
+    SIGMA_FACTOR_DYNAMICS = 0.1;     // Default factor sigmas
+    SIGMA_FACTOR_INTERROBOT = 10.0;
+    SIGMA_FACTOR_OBSTACLE = 0.01;
+};
 
 /*****************************************************************/
 // Allows for parsing of an external config file
@@ -90,8 +111,11 @@ int Globals::parse_global_args(DArgs::DArgs &dargs)
     }
 
     std::ifstream my_config_file(CONFIG_FILE);
-    assert(my_config_file && "Couldn't find the config file");
-    parse_global_args(my_config_file);
+    if (my_config_file) {
+        parse_global_args(my_config_file);
+    } else {
+        std::cout << "Warning: Config file not found, using default values" << std::endl;
+    }
     post_parsing();
 
     return 0;

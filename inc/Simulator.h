@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <algorithm>
+#include <fstream>
 
 #include <Utils.h>
 #include <gbp/GBPCore.h>
@@ -76,6 +77,7 @@ public:
     std::pair<Eigen::Vector2d, Eigen::Vector2d> getContactPoint(int robot_id, int payload_id);
     bool isRobotContactingPayload(int robot_id, int payload_id);
     b2World* physicsWorld_ = nullptr;
+    std::ofstream trajectory_csv_file_;                     // CSV file stream for trajectory export
 
 
     b2World* getPhysicsWorld(){
@@ -109,6 +111,10 @@ public:
     // Obstacle management functions
     void loadObstacles();
     void drawObstacles();
+
+    // CSV export functions
+    void initCSVExport();
+    void exportPayloadTrajectory();
 
     /*******************************************************************************/
     // Set a proportion of robots to not perform inter-robot communications
