@@ -592,7 +592,7 @@ void Simulator::initCSVExport() {
     trajectory_csv_file_.open("payload_trajectory.csv");
     if (trajectory_csv_file_.is_open()) {
         // Write header row
-        trajectory_csv_file_ << "payload_x,payload_y,payload_orientation" << std::endl;
+        trajectory_csv_file_ << "payload_x,payload_y,payload_orientation,velocity_x,velocity_y" << std::endl;
         std::cout << "CSV export initialized: payload_trajectory.csv" << std::endl;
     } else {
         std::cerr << "Error: Could not create CSV file for trajectory export" << std::endl;
@@ -614,7 +614,9 @@ void Simulator::exportPayloadTrajectory() {
     // Write payload data to CSV
     trajectory_csv_file_ << payload->position_.x() << ","
                         << payload->position_.y() << ","
-                        << payload->rotation_ << std::endl;
+                        << payload->rotation_ << ","
+                        << payload->velocity_.x() << ","
+                        << payload->velocity_.y() << std::endl;
     
     // Flush to ensure data is written immediately
     trajectory_csv_file_.flush();

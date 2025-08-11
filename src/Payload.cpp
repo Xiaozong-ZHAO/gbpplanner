@@ -87,6 +87,11 @@ void Payload::update() {
         position_.y() = physpos.y;
         rotation_ = physicsBody_->GetAngle();
         
+        // Update velocity from physics body
+        b2Vec2 physvel = physicsBody_->GetLinearVelocity();
+        velocity_.x() = physvel.x;
+        velocity_.y() = physvel.y;
+        
         // 正确更新current_orientation_
         current_orientation_ = Eigen::Quaterniond(cos(rotation_/2), 0, 0, sin(rotation_/2));
         
