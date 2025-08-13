@@ -4,6 +4,7 @@
 /**************************************************************************************/
 #include <iostream>
 #include <fstream>
+#include <chrono>
 #include <gbp/GBPCore.h>
 #include <Simulator.h>
 #include <Graphics.h>
@@ -210,11 +211,18 @@ void Simulator::timestep() {
     
     setCommsFailure(globals.COMMS_FAILURE_RATE);
     
+    // Start timing GBP iterations
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
     // GBP iterations
     for (int i = 0; i < globals.NUM_ITERS; i++) {
         iterateGBP(1, INTERNAL, robots_);
         iterateGBP(1, EXTERNAL, robots_);
     }
+    
+    // End timing GBP iterations
+    auto end_time = std::chrono::high_resolution_clock::now();
+    gbp_duration_microseconds_ = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
     
     // Update robot states
     for (auto [r_id, robot] : robots_) {
@@ -592,7 +600,7 @@ void Simulator::initCSVExport() {
     trajectory_csv_file_.open("payload_trajectory.csv");
     if (trajectory_csv_file_.is_open()) {
         // Write header row
-        trajectory_csv_file_ << "payload_x,payload_y,payload_orientation,velocity_x,velocity_y" << std::endl;
+        trajectory_csv_file_ << "payload_x,payload_y,payload_orientation,velocity_x,velocity_y,gbp_duration_us" << std::endl;
         std::cout << "CSV export initialized: payload_trajectory.csv" << std::endl;
     } else {
         std::cerr << "Error: Could not create CSV file for trajectory export" << std::endl;
@@ -616,7 +624,8 @@ void Simulator::exportPayloadTrajectory() {
                         << payload->position_.y() << ","
                         << payload->rotation_ << ","
                         << payload->velocity_.x() << ","
-                        << payload->velocity_.y() << std::endl;
+                        << payload->velocity_.y() << ","
+                        << gbp_duration_microseconds_ << std::endl;
     
     // Flush to ensure data is written immediately
     trajectory_csv_file_.flush();

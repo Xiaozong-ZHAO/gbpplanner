@@ -78,6 +78,7 @@ public:
     bool isRobotContactingPayload(int robot_id, int payload_id);
     b2World* physicsWorld_ = nullptr;
     std::ofstream trajectory_csv_file_;                     // CSV file stream for trajectory export
+    double gbp_duration_microseconds_ = 0.0;               // Last GBP iteration duration in microseconds
 
 
     b2World* getPhysicsWorld(){
