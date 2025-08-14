@@ -10,6 +10,7 @@ project(GBPPlanner)
 add_compile_definitions(EIGEN_DONT_PARALLELIZE)
 find_package(OpenMP REQUIRED)
 find_package(box2d REQUIRED)
+find_package(GTSAM REQUIRED)
 add_subdirectory(thirdparty/raylib)
 #################################################################
 add_library(gbp STATIC
@@ -29,8 +30,9 @@ add_executable(gbpplanner
  src/Utils.cpp
  src/Graphics.cpp
  src/Payload.cpp
+ src/RobotGTSAM.cpp
 )
-target_link_libraries(gbpplanner PUBLIC gbp box2d)
+target_link_libraries(gbpplanner PUBLIC gbp box2d gtsam)
 
 
 
