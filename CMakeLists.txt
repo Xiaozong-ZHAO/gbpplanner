@@ -32,19 +32,24 @@ add_executable(gbpplanner
  src/Payload.cpp
  src/RobotGTSAM.cpp
 )
+add_executable( test_gtsam
+    src/test.cpp
+    src/RobotGTSAM.cpp
+)
 target_link_libraries(gbpplanner PUBLIC gbp box2d gtsam)
-
+target_link_libraries(test_gtsam PUBLIC gbp box2d gtsam)
+target_include_directories(test_gtsam PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty)
 
 
 # Checks if OSX and links appropriate frameworks (only required on MacOS)
 if(APPLE)
- foreach(target gbpplanner)
- target_link_libraries(${target} PUBLIC
-"-framework Cocoa"
-"-framework OpenGL"
-"-framework IOKit"
-"-framework CoreVideo"
- )
+ foreach(target gbpplanner test_gtsam)
+   target_link_libraries(${target} PUBLIC
+     "-framework Cocoa"
+     "-framework OpenGL"
+     "-framework IOKit"
+     "-framework CoreVideo"
+   )
  endforeach()
 endif()
 #################################################################
