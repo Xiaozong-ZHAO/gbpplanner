@@ -1,7 +1,5 @@
 #include "RobotGTSAM.h"
-#include <gtsam/geometry/Pose3.h>
-#include <gtsam/geometry/Rot3.h>
-#include <gtsam/geometry/Point3.h>
+#include <gtsam/base/Vector.h>
 #include <iostream>
 
 int main() {
@@ -9,17 +7,15 @@ int main() {
 
     RobotGTSAM robot;
 
-    // 添加两个测试位姿
-    gtsam::Pose3 pose1(
-        gtsam::Rot3::RzRyRx(0.1, 0.2, 0.1),
-        gtsam::Point3(1.0, 0.0, 0.0));
+    // 添加两个测试状态 [x, y, xdot, ydot]
+    gtsam::Vector4 state1;
+    state1 << 1.0, 0.0, 0.5, 0.0;  // x=1, y=0, xdot=0.5, ydot=0
 
-    gtsam::Pose3 pose2(
-        gtsam::Rot3::RzRyRx(0.2, 0.1, -0.1),
-        gtsam::Point3(2.0, 0.2, 0.1));
+    gtsam::Vector4 state2;
+    state2 << 2.0, 0.2, 0.4, 0.1;  // x=2, y=0.2, xdot=0.4, ydot=0.1
 
-    robot.addPose(pose1);
-    robot.addPose(pose2);
+    robot.addState(state1);
+    robot.addState(state2);
 
     robot.optimize();
 

@@ -1,39 +1,35 @@
 #include "RobotGTSAM.h"
+#include "DynamicsFactor.h"
 
 #include <gtsam/slam/PriorFactor.h>
-#include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
 #include <gtsam/nonlinear/Marginals.h>
 #include <iostream>
 
-RobotGTSAM::RobotGTSAM() {
-    gtsam::Pose3 priorPose;
+RobotGTSAM::RobotGTSAM() : dt_(0.1) {
+    gtsam::Vector4 priorState = gtsam::Vector4::Zero();
     gtsam::SharedNoiseModel priorNoise =
-        gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector6::Constant(0.1));
+        gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4::Constant(0.1));
     
-    graph_.add(gtsam::PriorFactor<gtsam::Pose3>(
-        gtsam::Symbol('x', 0), priorPose, priorNoise));
+    graph_.add(gtsam::PriorFactor<gtsam::Vector4>(
+        gtsam::Symbol('x', 0), priorState, priorNoise));
     
-    // 添加初值
-    initial_estimate_.insert(gtsam::Symbol('x', 0),
-                             gtsam::Pose3::Expmap(gtsam::Vector6::Zero()));
+    initial_estimate_.insert(gtsam::Symbol('x', 0), priorState);
 }
 
 RobotGTSAM::~RobotGTSAM() {}
 
-void RobotGTSAM::addPose(const gtsam::Pose3& newPose) {
+void RobotGTSAM::addState(const gtsam::Vector4& newState) {
     static int idx = 1;
 
     gtsam::SharedNoiseModel noise =
-        gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector6::Constant(0.1));
-    gtsam::Pose3 prevPose = initial_estimate_.at<gtsam::Pose3>(gtsam::Symbol('x', idx - 1));
-    gtsam::Pose3 relative = prevPose.between(newPose);
+        gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4::Constant(0.1));
 
-    graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
-        gtsam::Symbol('x', idx - 1), gtsam::Symbol('x', idx), relative, noise));
+    graph_.add(std::make_shared<DynamicsFactor>(
+        gtsam::Symbol('x', idx - 1), gtsam::Symbol('x', idx), dt_, noise));
     
-    initial_estimate_.insert(gtsam::Symbol('x', idx), newPose);
+    initial_estimate_.insert(gtsam::Symbol('x', idx), newState);
     idx++;
 }
 
@@ -45,5 +41,5 @@ void RobotGTSAM::optimize() {
     gtsam::Values result = optimizer.optimize();
 
     std::cout << "=== Optimization Result ===" << std::endl;
-    result.print("Pose");
+    result.print("State");
 }
