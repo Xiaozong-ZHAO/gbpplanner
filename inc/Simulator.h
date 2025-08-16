@@ -24,6 +24,7 @@
 #include "Payload.h"
 
 class Robot;
+class RobotGTSAM;
 class Graphics;
 class TreeOfRobots;
 class Payload;
@@ -70,6 +71,7 @@ public:
     int next_payload_id_ = 0;
     uint32_t clock_ = 0;                            // Simulation clock (timesteps)                   
     std::map<int, std::shared_ptr<Robot>> robots_;  // Map containing smart pointers to all robots, accessed by their rid.
+    std::map<int, std::shared_ptr<RobotGTSAM>> robots_gtsam_; // Map containing smart pointers to all GTSAM robots, accessed by their rid.
     std::map<int, std::shared_ptr<Payload>> payloads_; // Map containing smart pointers to all payloads, accessed by their pid.
     bool new_robots_needed_ = true;                 // Whether or not to create new robots. (Some formations are dynamicaly changing)
     bool symmetric_factors = false;                 // If true, when inter-robot factors need to be created between two robots,
@@ -101,6 +103,7 @@ public:
     void reassignLostContacts(int payload_id);
 
     void createOrDeleteRobots();
+    void createOrDeleteRobotsGTSAM();
     void isRobotContactngPayload(int robot_id, int payload_id);
     void createPayload(Eigen::Vector2d position, float width, float height);
     void deletePayload(int payload_id);

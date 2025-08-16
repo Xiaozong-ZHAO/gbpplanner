@@ -9,6 +9,7 @@
 #include <Simulator.h>
 #include <Graphics.h>
 #include <Robot.h>
+#include <RobotGTSAM.h>
 #include <Payload.h>
 #include <nanoflann.h>
 #include "box2d/box2d.h"
@@ -113,6 +114,9 @@ void Simulator::draw(){
             
             // Draw Robots
             for (auto [rid, robot] : robots_) robot->draw();
+            
+            // Draw GTSAM Robots  
+            for (auto [rid, robot_gtsam] : robots_gtsam_) robot_gtsam->draw();
             
             // Draw Payloads
             for (auto [pid, payload]: payloads_) {
@@ -506,6 +510,73 @@ void Simulator::createOrDeleteRobots(){
     // Delete robots
     for (auto robot : robots_to_delete){
         deleteRobot(robot);
+    }
+}
+
+/*******************************************************************************/
+// Create GTSAM robots for centralized optimization approach (Payload formation only)
+/*******************************************************************************/
+void Simulator::createOrDeleteRobotsGTSAM(){
+    if (!new_robots_needed_) return;
+
+    if (globals.FORMATION == "Payload") {
+        new_robots_needed_ = false;
+        float robot_radius = globals.ROBOT_RADIUS;
+        
+        // Get payload information
+        if (payloads_.empty()) return;
+        
+        auto payload = payloads_.begin()->second;
+        auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
+        Eigen::Vector2d payload_centroid = payload->getPosition();
+        Eigen::Vector2d payload_target = payload->getTarget();
+        Eigen::MatrixXd payload_R = Quat2Rot(payload->getTargetRotation());
+
+        if (contact_points.empty()) {
+            std::cout << "Warning: No contact points available for payload" << std::endl;
+            return;
+        }
+        
+        // Create GTSAM robots for each contact point
+        for (int i = 0; i < globals.NUM_ROBOTS; i++) {
+            int contact_point_index = i % contact_points.size();
+            
+            // Get corresponding contact point and normal
+            Eigen::Vector2d contact_point = contact_points[contact_point_index];
+            Eigen::Vector2d contact_normal = contact_normals[contact_point_index];
+
+            // Robot initial position at contact point
+            Eigen::Vector2d robot_start_pos = contact_point;
+            
+            // Define start state [x, y, xdot, ydot]
+            gtsam::Vector4 start_state;
+            start_state << robot_start_pos.x(), robot_start_pos.y(), 0.0, 0.0;
+
+            // Calculate target position using same logic as GBP
+            Eigen::Vector2d relative_r = payload_R * (contact_point - payload_centroid);
+            
+            // Define target state [x, y, xdot, ydot] 
+            gtsam::Vector4 target_state;
+            target_state << payload_target.x() + relative_r.x(), 
+                           payload_target.y() + relative_r.y(),
+                           0.0, 0.0;
+
+            // Create robot color based on contact point index
+            Color robot_color = ColorFromHSV(contact_point_index * 360.0f / contact_points.size(), 1.0f, 0.75f);
+            
+            // Create GTSAM robot
+            auto robot_gtsam = std::make_shared<RobotGTSAM>(start_state, target_state, this, robot_color, robot_radius);
+            
+            robots_gtsam_[next_rid_++] = robot_gtsam;
+            
+            std::cout << "GTSAM Robot " << (next_rid_-1) << " created for contact point " << contact_point_index 
+                      << " at position (" << contact_point.x() << ", " << contact_point.y() << ")" << std::endl;
+        }
+        
+        // Optimize all GTSAM robots
+        for (auto& robot_pair : robots_gtsam_) {
+            robot_pair.second->optimize();
+        }
     }
 }
 
