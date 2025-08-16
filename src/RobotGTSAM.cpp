@@ -111,27 +111,47 @@ void RobotGTSAM::createFactors() {
 /********************************************************************************************/
 
 void RobotGTSAM::updateCurrent() {
-    // Main state update method - equivalent to Robot.cpp's updateCurrent()
-    optimize();
+    // Main state update method - matching Robot.cpp's updateCurrent() logic exactly
     
-    // Update current position from optimization result
-    if (!optimization_result_.empty()) {
-        try {
-            gtsam::Vector4 current_state = optimization_result_.at<gtsam::Vector4>(gtsam::Symbol('x', 0));
-            current_position_ = Eigen::Vector2d(current_state(0), current_state(1));
-            
-            // Add to trajectory for visualization
-            addTrajectoryPoint(current_position_);
-        } catch (const std::exception& e) {
-            std::cerr << "Error getting current state from optimization: " << e.what() << std::endl;
-        }
+    if (optimization_result_.empty()) {
+        // If no optimization result yet, run optimization first
+        optimize();
+        return;
+    }
+    
+    try {
+        // 1. Calculate increment (matching Robot.cpp logic)
+        //    Get states from optimized trajectory: x[0] and x[1]
+        gtsam::Vector4 current_state = getCurrentOptimizedState(0);  // x₀
+        gtsam::Vector4 next_state = getCurrentOptimizedState(1);     // x₁
+        gtsam::Vector4 increment = (next_state - current_state) * globals.TIMESTEP / globals.T0;
+        
+        // 2. Change variable prior (GTSAM equivalent to Robot.cpp's change_variable_prior)
+        //    Update the prior factor on x[0] to new position
+        gtsam::Vector4 new_prior = current_state + increment;
+        updateVariablePrior(0, new_prior);
+        
+        // 3. Update position for visualization (matching Robot.cpp)
+        current_position_ = current_position_ + increment.head<2>().cast<double>();  // x,y only
+        
+        // 4. Track trajectory for visualization (matching Robot.cpp)
+        addTrajectoryPoint(Eigen::Vector2d(current_position_(0), current_position_(1)));
+        
+        // 5. Sync logical to physics (same as Robot.cpp)
+        syncLogicalToPhysics();
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Error in updateCurrent: " << e.what() << std::endl;
+        // Fallback: run optimization if state access fails
+        optimize();
     }
 }
 
 void RobotGTSAM::updateHorizon() {
-    // Update horizon state - placeholder for now to match Robot.cpp interface
-    // In the future, this could update target states or replan the horizon
-    // For now, GTSAM robots optimize the full trajectory each time
+    // Update horizon state - this is where full optimization happens (less frequently)
+    // This matches Robot.cpp's approach where planning happens less frequently than state updates
+    optimize();
+    updateVisualization();
 }
 
 /********************************************************************************************/
@@ -312,6 +332,10 @@ void RobotGTSAM::detachFromPayload() {
 }
 
 gtsam::Vector4 RobotGTSAM::getCurrentOptimizedState() const {
+    return getCurrentOptimizedState(0);  // Default to index 0
+}
+
+gtsam::Vector4 RobotGTSAM::getCurrentOptimizedState(int var_index) const {
     if (optimization_result_.empty()) {
         // Return current position with zero velocity if no optimization result
         gtsam::Vector4 state;
@@ -319,13 +343,69 @@ gtsam::Vector4 RobotGTSAM::getCurrentOptimizedState() const {
         return state;
     }
     
-    // Return the first variable (current state) from optimization result
+    // Return the specified variable from optimization result
     try {
-        return optimization_result_.at<gtsam::Vector4>(gtsam::Symbol('x', 0));
+        if (var_index >= num_variables_) {
+            // If requesting beyond available variables, return last variable
+            var_index = num_variables_ - 1;
+        }
+        return optimization_result_.at<gtsam::Vector4>(gtsam::Symbol('x', var_index));
     } catch (const std::exception& e) {
         // Fallback to current position with zero velocity
         gtsam::Vector4 state;
         state << current_position_(0), current_position_(1), 0.0, 0.0;
         return state;
+    }
+}
+
+void RobotGTSAM::updateVariablePrior(int var_index, const gtsam::Vector4& new_prior) {
+    // GTSAM equivalent of Robot.cpp's change_variable_prior()
+    // This updates the prior factor on the specified variable
+    
+    if (var_index >= num_variables_) {
+        std::cerr << "Warning: Variable index " << var_index << " exceeds available variables" << std::endl;
+        return;
+    }
+    
+    try {
+        // For now, we'll update the initial estimate and re-optimize when needed
+        // In a more sophisticated implementation, we could remove the old prior factor
+        // and add a new one, but this requires more complex factor graph manipulation
+        initial_estimate_.update(gtsam::Symbol('x', var_index), new_prior);
+        
+        // Update optimization result to reflect the new prior
+        if (!optimization_result_.empty()) {
+            optimization_result_.update(gtsam::Symbol('x', var_index), new_prior);
+        }
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Error updating variable prior: " << e.what() << std::endl;
+    }
+}
+
+void RobotGTSAM::shiftTrajectoryHorizon() {
+    // Shift planned trajectory forward in time
+    // This matches Robot.cpp's approach of maintaining a moving horizon
+    
+    if (optimization_result_.empty() || num_variables_ <= 1) {
+        return;
+    }
+    
+    try {
+        // Shift all variables: x[i] ← x[i+1]
+        // The last variable will be duplicated (could be improved with re-planning)
+        for (int i = 0; i < num_variables_ - 1; i++) {
+            gtsam::Vector4 next_state = optimization_result_.at<gtsam::Vector4>(gtsam::Symbol('x', i + 1));
+            initial_estimate_.update(gtsam::Symbol('x', i), next_state);
+            optimization_result_.update(gtsam::Symbol('x', i), next_state);
+        }
+        
+        // For the last variable, we could extrapolate or keep the target
+        // For now, keep the target state
+        gtsam::Vector4 last_state = optimization_result_.at<gtsam::Vector4>(gtsam::Symbol('x', num_variables_ - 1));
+        initial_estimate_.update(gtsam::Symbol('x', num_variables_ - 1), last_state);
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Error shifting trajectory horizon: " << e.what() << std::endl;
     }
 }

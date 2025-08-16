@@ -71,7 +71,10 @@ private:
     void optimize();                           // Internal optimization call
     void updateVisualization();               // Update visualization after optimization
     void addTrajectoryPoint(const Eigen::Vector2d& point);  // Add trajectory point
-    gtsam::Vector4 getCurrentOptimizedState() const;        // Get optimized state
+    gtsam::Vector4 getCurrentOptimizedState() const;        // Get optimized state (index 0)
+    gtsam::Vector4 getCurrentOptimizedState(int var_index) const;  // Get optimized state by index
+    void updateVariablePrior(int var_index, const gtsam::Vector4& new_prior);  // Update GTSAM prior factor
+    void shiftTrajectoryHorizon();             // Shift planned trajectory forward in time
 };
 
 #endif // ROBOT_GTSAM_H
