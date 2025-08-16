@@ -9,9 +9,7 @@
 class RobotGTSAM {
 public:
     RobotGTSAM(const gtsam::Vector4& start_state, 
-               const gtsam::Vector4& target_state, 
-               int num_variables = 24,
-               double dt = 0.1);
+               const gtsam::Vector4& target_state);
     ~RobotGTSAM();
 
     void optimize();

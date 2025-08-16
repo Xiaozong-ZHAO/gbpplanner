@@ -1,5 +1,6 @@
 #include "RobotGTSAM.h"
 #include "DynamicsFactor.h"
+#include <Globals.h>
 
 #include <gtsam/slam/PriorFactor.h>
 #include <gtsam/inference/Symbol.h>
@@ -8,11 +9,15 @@
 #include <iostream>
 #include <cmath>
 
+extern Globals globals;
+
 RobotGTSAM::RobotGTSAM(const gtsam::Vector4& start_state, 
-                       const gtsam::Vector4& target_state, 
-                       int num_variables,
-                       double dt) 
-    : dt_(dt), num_variables_(num_variables) {
+                       const gtsam::Vector4& target_state) {
+    
+    // Calculate parameters from globals (matching GBP logic)
+    dt_ = globals.T0;
+    std::vector<int> timesteps = getVariableTimesteps(globals.T_HORIZON / globals.T0, globals.LOOKAHEAD_MULTIPLE);
+    num_variables_ = timesteps.size();
     
     createVariables(start_state, target_state);
     createFactors();
@@ -39,13 +44,8 @@ std::vector<int> RobotGTSAM::getVariableTimesteps(int lookahead_horizon, int loo
 }
 
 void RobotGTSAM::createVariables(const gtsam::Vector4& start_state, const gtsam::Vector4& target_state) {
-    // Get timesteps using GBP logic (T_HORIZON=10, T0=0.1, LOOKAHEAD_MULTIPLE=3)
-    std::vector<int> timesteps = getVariableTimesteps(100, 3); // 10/0.1 = 100 timesteps
-    
-    // Ensure we have exactly num_variables_ timesteps
-    if (timesteps.size() > num_variables_) {
-        timesteps.resize(num_variables_);
-    }
+    // Get timesteps using GBP logic with globals configuration
+    std::vector<int> timesteps = getVariableTimesteps(globals.T_HORIZON / globals.T0, globals.LOOKAHEAD_MULTIPLE);
     
     // Create variables with linear interpolation between start and target
     for (int i = 0; i < num_variables_; i++) {
@@ -60,11 +60,12 @@ void RobotGTSAM::createVariables(const gtsam::Vector4& start_state, const gtsam:
 }
 
 void RobotGTSAM::createFactors() {
+    // Use global configuration for noise models (matching GBP)
     gtsam::SharedNoiseModel dynamics_noise =
-        gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4::Constant(0.01)); // Match GBP SIGMA_FACTOR_DYNAMICS
+        gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4::Constant(globals.SIGMA_FACTOR_DYNAMICS));
     
     gtsam::SharedNoiseModel prior_noise_strong =
-        gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4::Constant(0.01)); // Strong prior for start/end
+        gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4::Constant(globals.SIGMA_POSE_FIXED));
     
     // Add strong prior on first variable (start state)
     graph_.add(gtsam::PriorFactor<gtsam::Vector4>(
