@@ -24,10 +24,9 @@ public:
                b2World* physicsWorld = nullptr);
     ~RobotGTSAM();
 
-    void optimize();
+    void updateCurrent();              // Main state update method (replaces optimize())
+    void updateHorizon();              // Update horizon state to match Robot.cpp interface
     void draw();
-    void updateVisualization();
-    void addTrajectoryPoint(const Eigen::Vector2d& point);
     
     // Physics integration methods
     void createPhysicsBody();
@@ -35,7 +34,6 @@ public:
     void syncPhysicsToLogical();
     void attachToPayload(std::shared_ptr<Payload> payload, Eigen::Vector2d attach_point);
     void detachFromPayload();
-    gtsam::Vector4 getCurrentOptimizedState() const;
     
     // Get variable timesteps (matching GBP logic)
     static std::vector<int> getVariableTimesteps(int lookahead_horizon, int lookahead_multiple);
@@ -68,6 +66,12 @@ private:
     void createVariables(const gtsam::Vector4& start_state, const gtsam::Vector4& target_state);
     void createFactors();
     void initializeVisualization(const gtsam::Vector4& start_state, const gtsam::Vector4& target_state);
+    
+    // Implementation details (formerly public methods)
+    void optimize();                           // Internal optimization call
+    void updateVisualization();               // Update visualization after optimization
+    void addTrajectoryPoint(const Eigen::Vector2d& point);  // Add trajectory point
+    gtsam::Vector4 getCurrentOptimizedState() const;        // Get optimized state
 };
 
 #endif // ROBOT_GTSAM_H

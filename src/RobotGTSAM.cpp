@@ -106,6 +106,38 @@ void RobotGTSAM::createFactors() {
     }
 }
 
+/********************************************************************************************/
+// Main Interface Methods (matching Robot.cpp)
+/********************************************************************************************/
+
+void RobotGTSAM::updateCurrent() {
+    // Main state update method - equivalent to Robot.cpp's updateCurrent()
+    optimize();
+    
+    // Update current position from optimization result
+    if (!optimization_result_.empty()) {
+        try {
+            gtsam::Vector4 current_state = optimization_result_.at<gtsam::Vector4>(gtsam::Symbol('x', 0));
+            current_position_ = Eigen::Vector2d(current_state(0), current_state(1));
+            
+            // Add to trajectory for visualization
+            addTrajectoryPoint(current_position_);
+        } catch (const std::exception& e) {
+            std::cerr << "Error getting current state from optimization: " << e.what() << std::endl;
+        }
+    }
+}
+
+void RobotGTSAM::updateHorizon() {
+    // Update horizon state - placeholder for now to match Robot.cpp interface
+    // In the future, this could update target states or replan the horizon
+    // For now, GTSAM robots optimize the full trajectory each time
+}
+
+/********************************************************************************************/
+// Internal Implementation Methods
+/********************************************************************************************/
+
 void RobotGTSAM::optimize() {
     gtsam::LevenbergMarquardtParams params;
     params.setVerbosity("ERROR");

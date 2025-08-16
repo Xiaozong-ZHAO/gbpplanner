@@ -575,7 +575,7 @@ void Simulator::createOrDeleteRobotsGTSAM(){
         
         // Optimize all GTSAM robots
         for (auto& robot_pair : robots_gtsam_) {
-            robot_pair.second->optimize();
+            robot_pair.second->updateCurrent();
         }
     }
 }
@@ -626,17 +626,14 @@ void Simulator::syncGTSAMLogicalToPhysics() {
 
 void Simulator::optimizeAllGTSAMRobots() {
     for (auto& [rid, robot_gtsam] : robots_gtsam_) {
-        robot_gtsam->optimize();
+        robot_gtsam->updateCurrent();
     }
 }
 
 void Simulator::updateGTSAMRobotStates() {
-    // Extract first optimized state from each robot's results
-    // Update current_position_ for visualization and next optimization cycle
+    // Update horizon state for all GTSAM robots (matching Robot.cpp interface)
     for (auto& [rid, robot_gtsam] : robots_gtsam_) {
-        // The state update will be handled by the robot itself
-        // when getCurrentOptimizedState() is called during physics sync
-        robot_gtsam->updateVisualization();
+        robot_gtsam->updateHorizon();
     }
 }
 
