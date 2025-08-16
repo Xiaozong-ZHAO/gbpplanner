@@ -8,9 +8,11 @@
 #include <deque>
 #include <raylib.h>
 #include <Eigen/Dense>
+#include "box2d/box2d.h"
 
 // Forward declarations
 class Simulator;
+class Payload;
 
 class RobotGTSAM {
 public:
@@ -18,13 +20,22 @@ public:
                const gtsam::Vector4& target_state,
                Simulator* sim = nullptr,
                Color color = DARKGREEN,
-               float robot_radius = 1.0f);
+               float robot_radius = 1.0f,
+               b2World* physicsWorld = nullptr);
     ~RobotGTSAM();
 
     void optimize();
     void draw();
     void updateVisualization();
     void addTrajectoryPoint(const Eigen::Vector2d& point);
+    
+    // Physics integration methods
+    void createPhysicsBody();
+    void syncLogicalToPhysics();
+    void syncPhysicsToLogical();
+    void attachToPayload(std::shared_ptr<Payload> payload, Eigen::Vector2d attach_point);
+    void detachFromPayload();
+    gtsam::Vector4 getCurrentOptimizedState() const;
     
     // Get variable timesteps (matching GBP logic)
     static std::vector<int> getVariableTimesteps(int lookahead_horizon, int lookahead_multiple);
@@ -46,6 +57,12 @@ private:
     float robot_radius_;
     float height_3D_;
     bool interrobot_comms_active_;
+    
+    // Physics integration (matching Robot.cpp)
+    b2Body* physicsBody_;           // The Box2D body representing the robot
+    b2World* physicsWorld_;         // Reference to the physics world
+    bool usePhysics_;               // Flag indicating if physics is enabled
+    b2WeldJoint* payload_joint_;    // Joint for payload attachment
     
     // Helper methods
     void createVariables(const gtsam::Vector4& start_state, const gtsam::Vector4& target_state);

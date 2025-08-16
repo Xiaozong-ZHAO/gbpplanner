@@ -564,8 +564,8 @@ void Simulator::createOrDeleteRobotsGTSAM(){
             // Create robot color based on contact point index
             Color robot_color = ColorFromHSV(contact_point_index * 360.0f / contact_points.size(), 1.0f, 0.75f);
             
-            // Create GTSAM robot
-            auto robot_gtsam = std::make_shared<RobotGTSAM>(start_state, target_state, this, robot_color, robot_radius);
+            // Create GTSAM robot with physics support
+            auto robot_gtsam = std::make_shared<RobotGTSAM>(start_state, target_state, this, robot_color, robot_radius, getPhysicsWorld());
             
             robots_gtsam_[next_rid_++] = robot_gtsam;
             

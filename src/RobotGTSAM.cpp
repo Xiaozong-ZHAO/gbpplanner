@@ -2,6 +2,7 @@
 #include "DynamicsFactor.h"
 #include <Globals.h>
 #include <Simulator.h>
+#include <Payload.h>
 
 #include <gtsam/slam/PriorFactor.h>
 #include <gtsam/inference/Symbol.h>
@@ -16,8 +17,11 @@ RobotGTSAM::RobotGTSAM(const gtsam::Vector4& start_state,
                        const gtsam::Vector4& target_state,
                        Simulator* sim,
                        Color color,
-                       float robot_radius)
-    : sim_(sim), color_(color), robot_radius_(robot_radius) {
+                       float robot_radius,
+                       b2World* physicsWorld)
+    : sim_(sim), color_(color), robot_radius_(robot_radius), 
+      physicsWorld_(physicsWorld), physicsBody_(nullptr), 
+      usePhysics_(physicsWorld != nullptr), payload_joint_(nullptr) {
     
     // Calculate parameters from globals (matching GBP logic)
     dt_ = globals.T0;
@@ -26,6 +30,11 @@ RobotGTSAM::RobotGTSAM(const gtsam::Vector4& start_state,
     
     // Initialize visualization
     initializeVisualization(start_state, target_state);
+    
+    // Create physics body if physics is enabled
+    if (usePhysics_) {
+        createPhysicsBody();
+    }
     
     createVariables(start_state, target_state);
     createFactors();
@@ -192,5 +201,98 @@ void RobotGTSAM::draw() {
             DrawCubeV(Vector3{(float)waypoint(0), height_3D_, (float)waypoint(1)}, 
                       Vector3{robot_radius_, robot_radius_, robot_radius_}, col);
         }
+    }
+}
+
+/*******************************************************************************/
+// Physics Integration Methods
+/*******************************************************************************/
+
+void RobotGTSAM::createPhysicsBody(){
+    if (!usePhysics_ || !physicsWorld_) return;
+    
+    // Create a physics body for the robot
+    b2BodyDef bodyDef;
+    bodyDef.type = b2_dynamicBody;
+    bodyDef.position.Set(current_position_(0), current_position_(1));
+    physicsBody_ = physicsWorld_->CreateBody(&bodyDef);
+
+    // Create a circle collision shape for the robot
+    b2CircleShape circleShape;
+    circleShape.m_radius = robot_radius_;
+
+    // Create a fixture definition for the circle shape
+    b2FixtureDef fixtureDef;
+    fixtureDef.shape = &circleShape;
+    fixtureDef.density = 0.0f;
+    fixtureDef.friction = 0.0f;
+    fixtureDef.restitution = 0.0f;
+
+    physicsBody_->CreateFixture(&fixtureDef);
+}
+
+void RobotGTSAM::syncLogicalToPhysics(){
+    if (!usePhysics_ || !physicsBody_) return;
+    
+    // Get current optimized state [x, y, xdot, ydot]
+    gtsam::Vector4 current_state = getCurrentOptimizedState();
+    
+    // Extract velocity directly from indices 2 and 3 (same as Robot.cpp)
+    b2Vec2 desiredVel(current_state(2), current_state(3));
+    
+    physicsBody_->SetLinearVelocity(desiredVel);
+}
+
+void RobotGTSAM::syncPhysicsToLogical(){
+    if (!usePhysics_ || !physicsBody_) return;
+
+    b2Vec2 phyPos = physicsBody_->GetPosition();
+    current_position_[0] = phyPos.x;
+    current_position_[1] = phyPos.y;
+}
+
+void RobotGTSAM::attachToPayload(std::shared_ptr<Payload> payload, Eigen::Vector2d attach_point) {
+    if (!usePhysics_ || !physicsBody_ || !payload) return;
+    
+    // Get payload's physics body
+    b2Body* payload_body = payload->physicsBody_;
+    if (!payload_body) return;
+    
+    // Create weld joint between robot and payload
+    b2WeldJointDef jointDef;
+    jointDef.bodyA = physicsBody_;
+    jointDef.bodyB = payload_body;
+    jointDef.localAnchorA.Set(0.0f, 0.0f);  // Robot center
+    jointDef.localAnchorB.Set(attach_point.x() - payload->getPosition().x(), 
+                             attach_point.y() - payload->getPosition().y());
+    jointDef.stiffness = 10000.0f;
+    jointDef.damping = 10000.0f;
+    
+    payload_joint_ = (b2WeldJoint*)physicsWorld_->CreateJoint(&jointDef);
+}
+
+void RobotGTSAM::detachFromPayload() {
+    if (!usePhysics_ || !payload_joint_) return;
+    
+    physicsWorld_->DestroyJoint(payload_joint_);
+    payload_joint_ = nullptr;
+}
+
+gtsam::Vector4 RobotGTSAM::getCurrentOptimizedState() const {
+    if (optimization_result_.empty()) {
+        // Return current position with zero velocity if no optimization result
+        gtsam::Vector4 state;
+        state << current_position_(0), current_position_(1), 0.0, 0.0;
+        return state;
+    }
+    
+    // Return the first variable (current state) from optimization result
+    try {
+        return optimization_result_.at<gtsam::Vector4>(gtsam::Symbol('x', 0));
+    } catch (const std::exception& e) {
+        // Fallback to current position with zero velocity
+        gtsam::Vector4 state;
+        state << current_position_(0), current_position_(1), 0.0, 0.0;
+        return state;
     }
 }
