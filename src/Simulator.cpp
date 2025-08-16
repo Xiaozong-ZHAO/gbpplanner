@@ -581,6 +581,88 @@ void Simulator::createOrDeleteRobotsGTSAM(){
 }
 
 /*******************************************************************************/
+// GTSAM timestep implementation - centralized optimization approach
+/*******************************************************************************/
+void Simulator::timestepGTSAM() {
+    // Physics sync before optimization
+    syncGTSAMPhysicsToLogical();
+    
+    // Core GTSAM operations  
+    updateDistributedPayloadControlGTSAM();
+    optimizeAllGTSAMRobots();
+    updateGTSAMRobotStates();
+    
+    // Physics sync after optimization
+    syncGTSAMLogicalToPhysics();
+    
+    // Physics world step (if physics enabled)
+    if (physicsWorld_) {
+        physicsWorld_->Step(globals.TIMESTEP, 6, 2);
+    }
+    
+    // Update payload states from physics (matching existing timestep)
+    for (auto& [pid, payload] : payloads_) {
+        payload->update();
+    }
+    
+    // Export payload trajectory data to CSV
+    exportPayloadTrajectory();
+    
+    clock_++;
+    if (clock_ >= globals.MAX_TIME) globals.RUN = false;
+}
+
+void Simulator::syncGTSAMPhysicsToLogical() {
+    for (auto& [rid, robot_gtsam] : robots_gtsam_) {
+        robot_gtsam->syncPhysicsToLogical();
+    }
+}
+
+void Simulator::syncGTSAMLogicalToPhysics() {
+    for (auto& [rid, robot_gtsam] : robots_gtsam_) {
+        robot_gtsam->syncLogicalToPhysics();
+    }
+}
+
+void Simulator::optimizeAllGTSAMRobots() {
+    for (auto& [rid, robot_gtsam] : robots_gtsam_) {
+        robot_gtsam->optimize();
+    }
+}
+
+void Simulator::updateGTSAMRobotStates() {
+    // Extract first optimized state from each robot's results
+    // Update current_position_ for visualization and next optimization cycle
+    for (auto& [rid, robot_gtsam] : robots_gtsam_) {
+        // The state update will be handled by the robot itself
+        // when getCurrentOptimizedState() is called during physics sync
+        robot_gtsam->updateVisualization();
+    }
+}
+
+void Simulator::updateDistributedPayloadControlGTSAM() {
+    // Adapted version of updateDistributedPayloadControl for GTSAM robots
+    if (globals.FORMATION != "Payload" || payloads_.empty()) return;
+    
+    auto payload = payloads_.begin()->second;
+    auto [contact_points, contact_normals] = payload->getContactPointsAndNormals();
+    
+    if (contact_points.empty()) return;
+    
+    // Update payload contact assignments for GTSAM robots
+    for (auto& [rid, robot_gtsam] : robots_gtsam_) {
+        // For now, we'll keep the same simple assignment as in createOrDeleteRobotsGTSAM
+        // More sophisticated contact assignment can be added later
+        
+        // Enable/disable rigid attachment for payload transport if configured
+        if (globals.USE_RIGID_ATTACHMENT) {
+            // The attachment was already set up in createOrDeleteRobotsGTSAM
+            // Here we could update attachment points if needed
+        }
+    }
+}
+
+/*******************************************************************************/
 // Deletes the robot from the simulator's robots_, as well as any variable/factors associated.
 /*******************************************************************************/
 void Simulator::deleteRobot(std::shared_ptr<Robot> robot){

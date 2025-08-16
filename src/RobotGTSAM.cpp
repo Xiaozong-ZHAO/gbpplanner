@@ -241,6 +241,7 @@ void RobotGTSAM::syncLogicalToPhysics(){
     b2Vec2 desiredVel(current_state(2), current_state(3));
     
     physicsBody_->SetLinearVelocity(desiredVel);
+    std::cout << "syncLogicalToPhysics is running..." << std::endl;
 }
 
 void RobotGTSAM::syncPhysicsToLogical(){

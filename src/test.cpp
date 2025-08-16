@@ -22,7 +22,7 @@ int main(int argc, char *argv[]) {
     while (globals.RUN) {
         sim->eventHandler();                // Capture keypresses or mouse events             
         sim->createOrDeleteRobotsGTSAM();   // Create GTSAM robots instead of GBP robots
-        sim->timestep();
+        sim->timestepGTSAM();               // Use GTSAM timestep for centralized optimization
         sim->draw();
     }
 

@@ -104,6 +104,12 @@ public:
 
     void createOrDeleteRobots();
     void createOrDeleteRobotsGTSAM();
+    void timestepGTSAM();
+    void syncGTSAMPhysicsToLogical();
+    void syncGTSAMLogicalToPhysics();
+    void updateDistributedPayloadControlGTSAM();
+    void optimizeAllGTSAMRobots();
+    void updateGTSAMRobotStates();
     void isRobotContactngPayload(int robot_id, int payload_id);
     void createPayload(Eigen::Vector2d position, float width, float height);
     void deletePayload(int payload_id);
