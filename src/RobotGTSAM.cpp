@@ -1,6 +1,7 @@
 #include "RobotGTSAM.h"
 #include "DynamicsFactor.h"
 #include <Globals.h>
+#include <Simulator.h>
 
 #include <gtsam/slam/PriorFactor.h>
 #include <gtsam/inference/Symbol.h>
@@ -12,12 +13,19 @@
 extern Globals globals;
 
 RobotGTSAM::RobotGTSAM(const gtsam::Vector4& start_state, 
-                       const gtsam::Vector4& target_state) {
+                       const gtsam::Vector4& target_state,
+                       Simulator* sim,
+                       Color color,
+                       float robot_radius)
+    : sim_(sim), color_(color), robot_radius_(robot_radius) {
     
     // Calculate parameters from globals (matching GBP logic)
     dt_ = globals.T0;
     std::vector<int> timesteps = getVariableTimesteps(globals.T_HORIZON / globals.T0, globals.LOOKAHEAD_MULTIPLE);
     num_variables_ = timesteps.size();
+    
+    // Initialize visualization
+    initializeVisualization(start_state, target_state);
     
     createVariables(start_state, target_state);
     createFactors();
@@ -94,10 +102,95 @@ void RobotGTSAM::optimize() {
     params.setVerbosity("ERROR");
     
     gtsam::LevenbergMarquardtOptimizer optimizer(graph_, initial_estimate_, params);
-    gtsam::Values result = optimizer.optimize();
+    optimization_result_ = optimizer.optimize();
 
     std::cout << "=== Optimization Result ===" << std::endl;
     std::cout << "Number of variables: " << num_variables_ << std::endl;
     std::cout << "Number of factors: " << graph_.size() << std::endl;
-    result.print("State");
+    optimization_result_.print("State");
+    
+    // Update visualization with optimized result
+    updateVisualization();
+}
+
+/********************************************************************************************/
+// Visualization Methods (matching Robot.cpp functionality)
+/********************************************************************************************/
+
+void RobotGTSAM::initializeVisualization(const gtsam::Vector4& start_state, const gtsam::Vector4& target_state) {
+    // Initialize visualization data
+    current_position_ = Eigen::Vector2d(start_state(0), start_state(1));
+    height_3D_ = robot_radius_;
+    interrobot_comms_active_ = true;
+    
+    // Add start and target as waypoints
+    Eigen::VectorXd start_waypoint(4);
+    start_waypoint << start_state(0), start_state(1), start_state(2), start_state(3);
+    waypoints_.push_back(start_waypoint);
+    
+    Eigen::VectorXd target_waypoint(4);
+    target_waypoint << target_state(0), target_state(1), target_state(2), target_state(3);
+    waypoints_.push_back(target_waypoint);
+    
+    // Initialize trajectory with starting position
+    trajectory_.push_back(current_position_);
+}
+
+void RobotGTSAM::updateVisualization() {
+    if (!optimization_result_.empty()) {
+        // Extract current position from first optimized variable
+        auto current_state = optimization_result_.at<gtsam::Vector4>(gtsam::Symbol('x', 0));
+        current_position_ = Eigen::Vector2d(current_state(0), current_state(1));
+        
+        // Add to trajectory history
+        addTrajectoryPoint(current_position_);
+    }
+}
+
+void RobotGTSAM::addTrajectoryPoint(const Eigen::Vector2d& point) {
+    trajectory_.push_back(point);
+    
+    // Limit trajectory size for performance (like Robot.cpp)
+    if (trajectory_.size() > 1000) {
+        trajectory_.erase(trajectory_.begin());
+    }
+}
+
+void RobotGTSAM::draw() {
+    if (!sim_ || !sim_->graphics) return;
+    
+    // Determine robot color (gray if comms inactive, like Robot.cpp)
+    Color col = interrobot_comms_active_ ? color_ : GRAY;
+    
+    // Draw robot body using 3D model
+    DrawModel(sim_->graphics->robotModel_, 
+              Vector3{(float)current_position_.x(), height_3D_, (float)current_position_.y()}, 
+              robot_radius_, col);
+    
+    // Draw planned path (spheres for each optimized variable)
+    if (globals.DRAW_PATH && !optimization_result_.empty()) {
+        for (int i = 0; i < num_variables_; i++) {
+            auto state = optimization_result_.at<gtsam::Vector4>(gtsam::Symbol('x', i));
+            DrawSphere(Vector3{(float)state(0), height_3D_, (float)state(1)}, 
+                       0.5f * robot_radius_, ColorAlpha(col, 0.5f));
+        }
+    }
+    
+    // Draw trajectory trail
+    if (globals.DRAW_PATH && trajectory_.size() > 1) {
+        Color trail_color = ColorAlpha(col, 0.8f);
+        for (size_t i = 1; i < trajectory_.size(); i++) {
+            Vector3 start = {(float)trajectory_[i-1].x(), 0.1f, (float)trajectory_[i-1].y()};
+            Vector3 end = {(float)trajectory_[i].x(), 0.1f, (float)trajectory_[i].y()};
+            DrawCylinderEx(start, end, 0.05f, 0.05f, 4, trail_color);
+        }
+    }
+    
+    // Draw waypoints
+    if (globals.DRAW_WAYPOINTS) {
+        for (const auto& waypoint : waypoints_) {
+            DrawCubeV(Vector3{(float)waypoint(0), height_3D_, (float)waypoint(1)}, 
+                      Vector3{robot_radius_, robot_radius_, robot_radius_}, col);
+        }
+    }
 }

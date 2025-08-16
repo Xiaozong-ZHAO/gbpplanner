@@ -39,6 +39,10 @@ add_executable( test_gtsam
     src/DynamicsFactor.cpp
     src/Globals.cpp
     src/Utils.cpp
+    src/Simulator.cpp
+    src/Graphics.cpp
+    src/Payload.cpp
+    src/Robot.cpp
 )
 target_link_libraries(gbpplanner PUBLIC gbp box2d gtsam)
 target_link_libraries(test_gtsam PUBLIC gbp box2d gtsam)
