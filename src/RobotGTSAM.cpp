@@ -6,31 +6,86 @@
 #include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
 #include <gtsam/nonlinear/Marginals.h>
 #include <iostream>
+#include <cmath>
 
-RobotGTSAM::RobotGTSAM() : dt_(0.1) {
-    gtsam::Vector4 priorState = gtsam::Vector4::Zero();
-    gtsam::SharedNoiseModel priorNoise =
-        gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4::Constant(0.1));
+RobotGTSAM::RobotGTSAM(const gtsam::Vector4& start_state, 
+                       const gtsam::Vector4& target_state, 
+                       int num_variables,
+                       double dt) 
+    : dt_(dt), num_variables_(num_variables) {
     
-    graph_.add(gtsam::PriorFactor<gtsam::Vector4>(
-        gtsam::Symbol('x', 0), priorState, priorNoise));
-    
-    initial_estimate_.insert(gtsam::Symbol('x', 0), priorState);
+    createVariables(start_state, target_state);
+    createFactors();
 }
 
 RobotGTSAM::~RobotGTSAM() {}
 
-void RobotGTSAM::addState(const gtsam::Vector4& newState) {
-    static int idx = 1;
+std::vector<int> RobotGTSAM::getVariableTimesteps(int lookahead_horizon, int lookahead_multiple) {
+    // Replicate GBP's getVariableTimesteps function
+    std::vector<int> var_list;
+    int N = 1 + int(0.5*(-1 + sqrt(1 + 8*(float)lookahead_horizon/(float)lookahead_multiple)));
 
-    gtsam::SharedNoiseModel noise =
-        gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4::Constant(0.1));
+    for (int i = 0; i < lookahead_multiple*(N+1); i++) {
+        int section = int(i/lookahead_multiple);
+        int f = (i - section*lookahead_multiple + lookahead_multiple/2.*section)*(section+1);
+        if (f >= lookahead_horizon) {
+            var_list.push_back(lookahead_horizon);
+            break;
+        }
+        var_list.push_back(f);
+    }
 
-    graph_.add(std::make_shared<DynamicsFactor>(
-        gtsam::Symbol('x', idx - 1), gtsam::Symbol('x', idx), dt_, noise));
+    return var_list;
+}
+
+void RobotGTSAM::createVariables(const gtsam::Vector4& start_state, const gtsam::Vector4& target_state) {
+    // Get timesteps using GBP logic (T_HORIZON=10, T0=0.1, LOOKAHEAD_MULTIPLE=3)
+    std::vector<int> timesteps = getVariableTimesteps(100, 3); // 10/0.1 = 100 timesteps
     
-    initial_estimate_.insert(gtsam::Symbol('x', idx), newState);
-    idx++;
+    // Ensure we have exactly num_variables_ timesteps
+    if (timesteps.size() > num_variables_) {
+        timesteps.resize(num_variables_);
+    }
+    
+    // Create variables with linear interpolation between start and target
+    for (int i = 0; i < num_variables_; i++) {
+        gtsam::Symbol key('x', i);
+        
+        // Linear interpolation: start + t * (target - start)
+        float t = (float)timesteps[i] / (float)timesteps.back();
+        gtsam::Vector4 interpolated_state = start_state + t * (target_state - start_state);
+        
+        initial_estimate_.insert(key, interpolated_state);
+    }
+}
+
+void RobotGTSAM::createFactors() {
+    gtsam::SharedNoiseModel dynamics_noise =
+        gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4::Constant(0.01)); // Match GBP SIGMA_FACTOR_DYNAMICS
+    
+    gtsam::SharedNoiseModel prior_noise_strong =
+        gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4::Constant(0.01)); // Strong prior for start/end
+    
+    // Add strong prior on first variable (start state)
+    graph_.add(gtsam::PriorFactor<gtsam::Vector4>(
+        gtsam::Symbol('x', 0), 
+        initial_estimate_.at<gtsam::Vector4>(gtsam::Symbol('x', 0)), 
+        prior_noise_strong));
+    
+    // Add strong prior on last variable (target state)
+    graph_.add(gtsam::PriorFactor<gtsam::Vector4>(
+        gtsam::Symbol('x', num_variables_ - 1), 
+        initial_estimate_.at<gtsam::Vector4>(gtsam::Symbol('x', num_variables_ - 1)), 
+        prior_noise_strong));
+    
+    // Add dynamics factors between consecutive variables
+    for (int i = 0; i < num_variables_ - 1; i++) {
+        graph_.add(std::make_shared<DynamicsFactor>(
+            gtsam::Symbol('x', i), 
+            gtsam::Symbol('x', i + 1), 
+            dt_, 
+            dynamics_noise));
+    }
 }
 
 void RobotGTSAM::optimize() {
@@ -41,5 +96,7 @@ void RobotGTSAM::optimize() {
     gtsam::Values result = optimizer.optimize();
 
     std::cout << "=== Optimization Result ===" << std::endl;
+    std::cout << "Number of variables: " << num_variables_ << std::endl;
+    std::cout << "Number of factors: " << graph_.size() << std::endl;
     result.print("State");
 }
