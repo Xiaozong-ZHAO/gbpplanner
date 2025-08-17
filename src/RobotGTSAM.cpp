@@ -181,70 +181,42 @@ void RobotGTSAM::createFactors() {
 /********************************************************************************************/
 
 void RobotGTSAM::updateCurrent() {
-    // Implement GBP Robot::updateCurrent() logic exactly (lines 284-303)
-    // NO optimization call - matching GBP approach
+    // Move plan: move plan current state by plan increment
+    gtsam::Vector4 current_state = getCurrentOptimizedState(0);  // x₀ 
+    gtsam::Vector4 next_state = getCurrentOptimizedState(1);     // x₁
+    gtsam::Vector4 increment = (next_state - current_state) * globals.TIMESTEP / globals.T0;
     
-    if (optimization_result_.empty()) {
-        // No optimization result yet, nothing to do
-        return;
-    }
+    // In GBP we do this by modifying the prior on the variable
+    gtsam::Vector4 new_prior = current_state + increment;
+    updateVariablePrior(0, new_prior);
     
-    try {
-        // 1. Calculate increment (matching Robot.cpp logic exactly)
-        //    Move plan: move plan current state by plan increment
-        //    Equivalent to: increment = ((*this)[1]->mu_ - (*this)[0]->mu_) * TIMESTEP / T0
-        gtsam::Vector4 current_state = getCurrentOptimizedState(0);  // x₀ 
-        gtsam::Vector4 next_state = getCurrentOptimizedState(1);     // x₁
-        gtsam::Vector4 increment = (next_state - current_state) * globals.TIMESTEP / globals.T0;
-        
-        // 2. Change variable prior (GTSAM equivalent to Robot.cpp's change_variable_prior)
-        //    In GBP we do this by modifying the prior on the variable
-        //    Equivalent to: getVar(0)->change_variable_prior(getVar(0)->mu_ + increment)
-        gtsam::Vector4 new_prior = current_state + increment;
-        updateVariablePrior(0, new_prior);
-        
-        // 3. Real pose update (matching Robot.cpp exactly)
-        //    Equivalent to: position_ = position_ + increment
-        current_position_ = current_position_ + increment.head<2>().cast<double>();
-        
-        // 4. Track trajectory for visualization (matching Robot.cpp)
-        addTrajectoryPoint(Eigen::Vector2d(current_position_(0), current_position_(1)));
-        
-        // 5. Sync logical to physics (same as Robot.cpp)
-        syncLogicalToPhysics();
-        
-    } catch (const std::exception& e) {
-        std::cerr << "Error in updateCurrent: " << e.what() << std::endl;
-        // No fallback optimization - let Simulator handle it
-    }
+    // Real pose update
+    current_position_ = current_position_ + increment.head<2>().cast<double>();
+    
+    // Track trajectory for visualization
+    addTrajectoryPoint(Eigen::Vector2d(current_position_(0), current_position_(1)));
+    
+    // Update physics body state to match logical state
+    syncLogicalToPhysics();
 }
 
 void RobotGTSAM::updateHorizon() {
-    
-    // Get last variable (horizon) - equivalent to GBP's getVar(-1)
+    // Horizon state moves towards the next waypoint.
+    // The Horizon state's velocity is capped at MAX_SPEED
     gtsam::Vector4 horizon_state = getCurrentOptimizedState(num_variables_ - 1);
-    
-    // Horizon moves toward the waypoint (robot's target) - same as GBP
-    Eigen::VectorXd waypoint_target = waypoints_.front();  // Target position
+    Eigen::VectorXd waypoint_target = waypoints_.front();
     Eigen::Vector2d dist_horz_to_goal = waypoint_target.head<2>() - horizon_state.head<2>().cast<double>();
-    
-    // Calculate new velocity (capped at MAX_SPEED) - same as GBP
     Eigen::Vector2d new_vel = dist_horz_to_goal.normalized() * std::min((double)globals.MAX_SPEED, dist_horz_to_goal.norm());
     Eigen::Vector2d new_pos = horizon_state.head<2>().cast<double>() + new_vel * globals.TIMESTEP;
-    
-    // Update horizon variable prior - GTSAM equivalent of GBP's change_variable_prior()
+
     gtsam::Vector4 new_horizon;
     new_horizon << new_pos.x(), new_pos.y(), new_vel.x(), new_vel.y();
     updateVariablePrior(num_variables_ - 1, new_horizon);
-    
-    // If the horizon has reached the waypoint, pop that waypoint (same as GBP)
+
+    // If the horizon has reached the waypoint, pop that waypoint from the waypoints.
     if (dist_horz_to_goal.norm() < robot_radius_) {
-        if (waypoints_.size() > 1) {
-            waypoints_.pop_front();
-        }
+        if (waypoints_.size() > 1) waypoints_.pop_front();
     }
-    
-    // NO optimize() call - let Simulator handle optimization separately
 }
 
 /********************************************************************************************/
