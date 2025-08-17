@@ -73,10 +73,18 @@ private:
     Eigen::Vector2d contact_point_local_;  // Robot's contact point in payload frame (r_i)
     Eigen::VectorXd start_waypoint_;  // Starting waypoint for variable creation
     
+    // Prior factor management (matching GBP variable priors)
+    size_t current_prior_factor_key_;
+    size_t horizon_prior_factor_key_;
+    gtsam::noiseModel::Diagonal::shared_ptr current_prior_noise_;
+    gtsam::noiseModel::Diagonal::shared_ptr horizon_prior_noise_;
+    
     // Helper methods
     void createVariables();
     void createFactors();
     void initializeVisualization();
+    void updateCurrentPrior(const gtsam::Vector4& new_prior);
+    void updateHorizonPrior(const gtsam::Vector4& new_horizon);
     
     void updateVisualization();               // Update visualization after optimization
     void addTrajectoryPoint(const Eigen::Vector2d& point);  // Add trajectory point

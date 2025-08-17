@@ -36,3 +36,5 @@ Currently, only dynamics factor, interrobot factor, obstacle factors are using. 
 When exploring the project, your highest priority is the .cpp and .h files and config files. We assume other parts are correct.
 
 When adding new function, no need to have try and exception, and no need test the special case with if() because we assume the variables would exist. just add the core functions. unless i told you to add try and exception.
+
+Dont do coding until i tell you to do so.

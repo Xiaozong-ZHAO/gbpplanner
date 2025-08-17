@@ -151,20 +151,23 @@ void RobotGTSAM::createFactors() {
     gtsam::SharedNoiseModel dynamics_noise =
         gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4::Constant(globals.SIGMA_FACTOR_DYNAMICS));
     
-    gtsam::SharedNoiseModel prior_noise_strong =
-        gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4::Constant(globals.SIGMA_POSE_FIXED));
+    // Create updateable prior noise models (matching GBP variable priors)
+    current_prior_noise_ = gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4::Constant(globals.SIGMA_POSE_FIXED));
+    horizon_prior_noise_ = gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4::Constant(globals.SIGMA_POSE_FIXED));
     
-    // Add strong prior on first variable (start state)
+    // Add updateable prior on first variable (current state)
+    current_prior_factor_key_ = graph_.size();
     graph_.add(gtsam::PriorFactor<gtsam::Vector4>(
         gtsam::Symbol('x', 0), 
         initial_estimate_.at<gtsam::Vector4>(gtsam::Symbol('x', 0)), 
-        prior_noise_strong));
+        current_prior_noise_));
     
-    // Add strong prior on last variable (target state)
+    // Add updateable prior on last variable (horizon state)
+    horizon_prior_factor_key_ = graph_.size();
     graph_.add(gtsam::PriorFactor<gtsam::Vector4>(
         gtsam::Symbol('x', num_variables_ - 1), 
         initial_estimate_.at<gtsam::Vector4>(gtsam::Symbol('x', num_variables_ - 1)), 
-        prior_noise_strong));
+        horizon_prior_noise_));
     
     // Add dynamics factors between consecutive variables
     for (int i = 0; i < num_variables_ - 1; i++) {
@@ -188,7 +191,7 @@ void RobotGTSAM::updateCurrent() {
     
     // In GBP we do this by modifying the prior on the variable
     gtsam::Vector4 new_prior = current_state + increment;
-    updateVariablePrior(0, new_prior);
+    updateCurrentPrior(new_prior);
     
     // Real pose update
     current_position_ = current_position_ + increment.head<2>().cast<double>();
@@ -203,6 +206,10 @@ void RobotGTSAM::updateCurrent() {
 void RobotGTSAM::updateHorizon() {
     // Horizon state moves towards the next waypoint.
     // The Horizon state's velocity is capped at MAX_SPEED
+    if (waypoints_.empty()) {
+        return;  // No waypoints to pursue
+    }
+    
     gtsam::Vector4 horizon_state = getCurrentOptimizedState(num_variables_ - 1);
     Eigen::VectorXd waypoint_target = waypoints_.front();
     Eigen::Vector2d dist_horz_to_goal = waypoint_target.head<2>() - horizon_state.head<2>().cast<double>();
@@ -211,11 +218,11 @@ void RobotGTSAM::updateHorizon() {
 
     gtsam::Vector4 new_horizon;
     new_horizon << new_pos.x(), new_pos.y(), new_vel.x(), new_vel.y();
-    updateVariablePrior(num_variables_ - 1, new_horizon);
+    updateHorizonPrior(new_horizon);
 
     // If the horizon has reached the waypoint, pop that waypoint from the waypoints.
     if (dist_horz_to_goal.norm() < robot_radius_) {
-        if (waypoints_.size() > 1) waypoints_.pop_front();
+        waypoints_.pop_front();
     }
 }
 
@@ -438,6 +445,28 @@ void RobotGTSAM::updateVariablePrior(int var_index, const gtsam::Vector4& new_pr
     } catch (const std::exception& e) {
         std::cerr << "Error updating variable prior: " << e.what() << std::endl;
     }
+}
+
+void RobotGTSAM::updateCurrentPrior(const gtsam::Vector4& new_prior) {
+    // Remove old current prior factor and add new one (matching GBP change_variable_prior)
+    graph_.remove(current_prior_factor_key_);
+    current_prior_factor_key_ = graph_.size();
+    graph_.add(gtsam::PriorFactor<gtsam::Vector4>(
+        gtsam::Symbol('x', 0), new_prior, current_prior_noise_));
+    
+    // Also update initial estimate
+    initial_estimate_.update(gtsam::Symbol('x', 0), new_prior);
+}
+
+void RobotGTSAM::updateHorizonPrior(const gtsam::Vector4& new_horizon) {
+    // Remove old horizon prior factor and add new one (matching GBP change_variable_prior)
+    graph_.remove(horizon_prior_factor_key_);
+    horizon_prior_factor_key_ = graph_.size();
+    graph_.add(gtsam::PriorFactor<gtsam::Vector4>(
+        gtsam::Symbol('x', num_variables_ - 1), new_horizon, horizon_prior_noise_));
+    
+    // Also update initial estimate
+    initial_estimate_.update(gtsam::Symbol('x', num_variables_ - 1), new_horizon);
 }
 
 void RobotGTSAM::shiftTrajectoryHorizon() {
