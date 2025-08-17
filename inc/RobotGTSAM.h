@@ -21,7 +21,9 @@ public:
                Simulator* sim = nullptr,
                Color color = DARKGREEN,
                float robot_radius = 1.0f,
-               b2World* physicsWorld = nullptr);
+               b2World* physicsWorld = nullptr,
+               Payload* payload = nullptr,
+               const Eigen::Vector2d& contact_point = Eigen::Vector2d::Zero());
     ~RobotGTSAM();
 
     void updateCurrent();              // Main state update method (replaces optimize())
@@ -61,6 +63,10 @@ private:
     b2World* physicsWorld_;         // Reference to the physics world
     bool usePhysics_;               // Flag indicating if physics is enabled
     b2WeldJoint* payload_joint_;    // Joint for payload attachment
+    
+    // Payload coupling parameters
+    Payload* payload_;              // Reference to payload for trajectory planning
+    Eigen::Vector2d contact_point_local_;  // Robot's contact point in payload frame (r_i)
     
     // Helper methods
     void createVariables(const gtsam::Vector4& start_state, const gtsam::Vector4& target_state);

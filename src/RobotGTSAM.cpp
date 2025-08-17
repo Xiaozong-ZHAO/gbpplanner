@@ -18,10 +18,13 @@ RobotGTSAM::RobotGTSAM(const gtsam::Vector4& start_state,
                        Simulator* sim,
                        Color color,
                        float robot_radius,
-                       b2World* physicsWorld)
+                       b2World* physicsWorld,
+                       Payload* payload,
+                       const Eigen::Vector2d& contact_point)
     : sim_(sim), color_(color), robot_radius_(robot_radius), 
       physicsWorld_(physicsWorld), physicsBody_(nullptr), 
-      usePhysics_(physicsWorld != nullptr), payload_joint_(nullptr) {
+      usePhysics_(physicsWorld != nullptr), payload_joint_(nullptr),
+      payload_(payload), contact_point_local_(contact_point) {
     
     // Calculate parameters from globals (matching GBP logic)
     dt_ = globals.T0;
@@ -64,13 +67,66 @@ void RobotGTSAM::createVariables(const gtsam::Vector4& start_state, const gtsam:
     // Get timesteps using GBP logic with globals configuration
     std::vector<int> timesteps = getVariableTimesteps(globals.T_HORIZON / globals.T0, globals.LOOKAHEAD_MULTIPLE);
     
-    // Create variables with linear interpolation between start and target
+    // Create variables with payload-coupled trajectory planning (matching Robot.cpp:65-120)
     for (int i = 0; i < num_variables_; i++) {
         gtsam::Symbol key('x', i);
+        gtsam::Vector4 interpolated_state;
         
-        // Linear interpolation: start + t * (target - start)
-        float t = (float)timesteps[i] / (float)timesteps.back();
-        gtsam::Vector4 interpolated_state = start_state + t * (target_state - start_state);
+        if (payload_ && globals.FORMATION == "Payload" && globals.T_HORIZON > 0) {
+            // Get payload contact points (matching Robot.cpp logic)
+            auto [contact_points, contact_normals] = payload_->getContactPointsAndNormals();
+            
+            if (contact_points.empty()) {
+                // Fallback to linear interpolation if no contact points
+                float t = (float)timesteps[i] / (float)timesteps.back();
+                interpolated_state = start_state + t * (target_state - start_state);
+            } else {
+                // Rigid body interpolation for payload formation
+                float t = (float)(timesteps[i] * globals.T0 / globals.T_HORIZON);
+                
+                // Get payload motion parameters
+                Eigen::Vector2d P_start = payload_->getPosition();
+                Eigen::Vector2d P_target = payload_->getTarget();
+                Eigen::Quaterniond q_start = payload_->current_orientation_;
+                Eigen::Quaterniond q_target = payload_->getTargetRotation();
+                
+                // Convert quaternions to rotation angles  
+                double θ_start = atan2(2.0 * (q_start.w() * q_start.z() + q_start.x() * q_start.y()),
+                                      1.0 - 2.0 * (q_start.y() * q_start.y() + q_start.z() * q_start.z()));
+                double θ_target = atan2(2.0 * (q_target.w() * q_target.z() + q_target.x() * q_target.y()),
+                                       1.0 - 2.0 * (q_target.y() * q_target.y() + q_target.z() * q_target.z()));
+                
+                // Interpolate payload state
+                Eigen::Vector2d P_t = P_start + (P_target - P_start) * t;
+                double θ_t = θ_start + (θ_target - θ_start) * t;
+                
+                // Use contact point from constructor parameter (r_i in payload frame)
+                Eigen::Vector2d r_i = contact_point_local_;
+                
+                // Rotation matrix at time t
+                Eigen::Matrix2d R_t;
+                R_t << cos(θ_t), -sin(θ_t),
+                       sin(θ_t),  cos(θ_t);
+                
+                // Robot position maintaining rigid body constraint
+                Eigen::Vector2d robot_pos_t = P_t + R_t * r_i;
+                
+                // Robot velocity from rigid body motion  
+                double T_total = globals.T_HORIZON;
+                Eigen::Vector2d v_payload = (P_target - P_start) / T_total;
+                double ω_payload = (θ_target - θ_start) / T_total;
+                
+                Eigen::Vector2d r_i_rotated = R_t * r_i;
+                Eigen::Vector2d robot_vel_t = v_payload + ω_payload * Eigen::Vector2d(-r_i_rotated.y(), r_i_rotated.x());
+                
+                // Set complete 4-DOF state
+                interpolated_state << robot_pos_t.x(), robot_pos_t.y(), robot_vel_t.x(), robot_vel_t.y();
+            }
+        } else {
+            // Original linear interpolation for non-payload formations
+            float t = (float)timesteps[i] / (float)timesteps.back();
+            interpolated_state = start_state + t * (target_state - start_state);
+        }
         
         initial_estimate_.insert(key, interpolated_state);
     }

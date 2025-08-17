@@ -545,6 +545,9 @@ void Simulator::createOrDeleteRobotsGTSAM(){
             Eigen::Vector2d contact_point = contact_points[contact_point_index];
             Eigen::Vector2d contact_normal = contact_normals[contact_point_index];
 
+            // Calculate contact point in payload frame (r_i) - matching Robot.cpp logic
+            Eigen::Vector2d r_i = contact_point - payload_centroid;
+            
             // Robot initial position at contact point
             Eigen::Vector2d robot_start_pos = contact_point;
             
@@ -564,8 +567,8 @@ void Simulator::createOrDeleteRobotsGTSAM(){
             // Create robot color based on contact point index
             Color robot_color = ColorFromHSV(contact_point_index * 360.0f / contact_points.size(), 1.0f, 0.75f);
             
-            // Create GTSAM robot with physics support
-            auto robot_gtsam = std::make_shared<RobotGTSAM>(start_state, target_state, this, robot_color, robot_radius, getPhysicsWorld());
+            // Create GTSAM robot with payload coupling support
+            auto robot_gtsam = std::make_shared<RobotGTSAM>(start_state, target_state, this, robot_color, robot_radius, getPhysicsWorld(), payload.get(), r_i);
             
             robots_gtsam_[next_rid_++] = robot_gtsam;
             
