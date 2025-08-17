@@ -30,6 +30,9 @@ public:
     void updateHorizon();              // Update horizon state to match Robot.cpp interface
     void draw();
     
+    // Optimization (for Simulator access)
+    void optimize();                   // GTSAM optimization call
+    
     // Physics integration methods
     void createPhysicsBody();
     void syncLogicalToPhysics();
@@ -75,8 +78,6 @@ private:
     void createFactors();
     void initializeVisualization();
     
-    // Implementation details (formerly public methods)
-    void optimize();                           // Internal optimization call
     void updateVisualization();               // Update visualization after optimization
     void addTrajectoryPoint(const Eigen::Vector2d& point);  // Add trajectory point
     gtsam::Vector4 getCurrentOptimizedState() const;        // Get optimized state (index 0)

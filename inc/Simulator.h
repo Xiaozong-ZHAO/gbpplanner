@@ -109,6 +109,7 @@ public:
     void syncGTSAMLogicalToPhysics();
     void updateDistributedPayloadControlGTSAM();
     void optimizeAllGTSAMRobots();
+    void updateAllGTSAMRobotsCurrent();
     void updateGTSAMRobotStates();
     void isRobotContactngPayload(int robot_id, int payload_id);
     void createPayload(Eigen::Vector2d position, float width, float height);

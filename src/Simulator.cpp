@@ -588,10 +588,11 @@ void Simulator::timestepGTSAM() {
     // Physics sync before optimization
     syncGTSAMPhysicsToLogical();
     
-    // Core GTSAM operations (matching GBP order: horizon first, then current)
+    // Core GTSAM operations (matching GBP architecture)
     updateDistributedPayloadControlGTSAM();
-    updateGTSAMRobotStates();      // updateHorizon() first (like GBP)
-    optimizeAllGTSAMRobots();      // updateCurrent() second (like GBP)
+    updateGTSAMRobotStates();        // updateHorizon() first (like GBP)
+    updateAllGTSAMRobotsCurrent();   // updateCurrent() second (like GBP)
+    optimizeAllGTSAMRobots();        // GTSAM optimization (equivalent to iterateGBP)
     
     // Physics sync after optimization
     syncGTSAMLogicalToPhysics();
@@ -626,6 +627,14 @@ void Simulator::syncGTSAMLogicalToPhysics() {
 }
 
 void Simulator::optimizeAllGTSAMRobots() {
+    // Run GTSAM optimization for all robots (equivalent to GBP's iterateGBP)
+    for (auto& [rid, robot_gtsam] : robots_gtsam_) {
+        robot_gtsam->optimize();  // Actual optimization call
+    }
+}
+
+void Simulator::updateAllGTSAMRobotsCurrent() {
+    // Update current state for all GTSAM robots (no optimization)
     for (auto& [rid, robot_gtsam] : robots_gtsam_) {
         robot_gtsam->updateCurrent();
     }

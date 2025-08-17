@@ -181,28 +181,31 @@ void RobotGTSAM::createFactors() {
 /********************************************************************************************/
 
 void RobotGTSAM::updateCurrent() {
-    // Main state update method - matching Robot.cpp's updateCurrent() logic exactly
+    // Implement GBP Robot::updateCurrent() logic exactly (lines 284-303)
+    // NO optimization call - matching GBP approach
     
     if (optimization_result_.empty()) {
-        // If no optimization result yet, run optimization first
-        optimize();
+        // No optimization result yet, nothing to do
         return;
     }
     
     try {
-        // 1. Calculate increment (matching Robot.cpp logic)
-        //    Get states from optimized trajectory: x[0] and x[1]
-        gtsam::Vector4 current_state = getCurrentOptimizedState(0);  // x₀
+        // 1. Calculate increment (matching Robot.cpp logic exactly)
+        //    Move plan: move plan current state by plan increment
+        //    Equivalent to: increment = ((*this)[1]->mu_ - (*this)[0]->mu_) * TIMESTEP / T0
+        gtsam::Vector4 current_state = getCurrentOptimizedState(0);  // x₀ 
         gtsam::Vector4 next_state = getCurrentOptimizedState(1);     // x₁
         gtsam::Vector4 increment = (next_state - current_state) * globals.TIMESTEP / globals.T0;
         
         // 2. Change variable prior (GTSAM equivalent to Robot.cpp's change_variable_prior)
-        //    Update the prior factor on x[0] to new position
+        //    In GBP we do this by modifying the prior on the variable
+        //    Equivalent to: getVar(0)->change_variable_prior(getVar(0)->mu_ + increment)
         gtsam::Vector4 new_prior = current_state + increment;
         updateVariablePrior(0, new_prior);
         
-        // 3. Update position for visualization (matching Robot.cpp)
-        current_position_ = current_position_ + increment.head<2>().cast<double>();  // x,y only
+        // 3. Real pose update (matching Robot.cpp exactly)
+        //    Equivalent to: position_ = position_ + increment
+        current_position_ = current_position_ + increment.head<2>().cast<double>();
         
         // 4. Track trajectory for visualization (matching Robot.cpp)
         addTrajectoryPoint(Eigen::Vector2d(current_position_(0), current_position_(1)));
@@ -212,21 +215,18 @@ void RobotGTSAM::updateCurrent() {
         
     } catch (const std::exception& e) {
         std::cerr << "Error in updateCurrent: " << e.what() << std::endl;
-        // Fallback: run optimization if state access fails
-        optimize();
+        // No fallback optimization - let Simulator handle it
     }
 }
 
 void RobotGTSAM::updateHorizon() {
     // Implement GBP Robot::updateHorizon() logic exactly (lines 327-343)
+    // NO optimization call - matching GBP approach
     if (waypoints_.empty()) {
-        // No target waypoint, just optimize
-        optimize();
-        updateVisualization();
-        return;
+        return;  // No target waypoint, nothing to do
     }
     
-    // Get last variable (horizon) - matching GBP logic
+    // Get last variable (horizon) - equivalent to GBP's getVar(-1)
     gtsam::Vector4 horizon_state = getCurrentOptimizedState(num_variables_ - 1);
     
     // Horizon moves toward the waypoint (robot's target) - same as GBP
@@ -237,7 +237,7 @@ void RobotGTSAM::updateHorizon() {
     Eigen::Vector2d new_vel = dist_horz_to_goal.normalized() * std::min((double)globals.MAX_SPEED, dist_horz_to_goal.norm());
     Eigen::Vector2d new_pos = horizon_state.head<2>().cast<double>() + new_vel * globals.TIMESTEP;
     
-    // Update horizon variable prior - same as GBP's change_variable_prior()
+    // Update horizon variable prior - GTSAM equivalent of GBP's change_variable_prior()
     gtsam::Vector4 new_horizon;
     new_horizon << new_pos.x(), new_pos.y(), new_vel.x(), new_vel.y();
     updateVariablePrior(num_variables_ - 1, new_horizon);
@@ -249,9 +249,7 @@ void RobotGTSAM::updateHorizon() {
         }
     }
     
-    // Run optimization with updated horizon
-    optimize();
-    updateVisualization();
+    // NO optimize() call - let Simulator handle optimization separately
 }
 
 /********************************************************************************************/
