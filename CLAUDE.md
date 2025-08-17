@@ -34,3 +34,5 @@ Currently, our target is to make all robots moves like one point on a rigid body
 Currently, only dynamics factor, interrobot factor, obstacle factors are using. Please ignore other factors.
 
 When exploring the project, your highest priority is the .cpp and .h files and config files. We assume other parts are correct.
+
+When adding new function, no need to have try and exception, and no need test the special case with if() because we assume the variables would exist. just add the core functions. unless i told you to add try and exception.

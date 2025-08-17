@@ -220,11 +220,6 @@ void RobotGTSAM::updateCurrent() {
 }
 
 void RobotGTSAM::updateHorizon() {
-    // Implement GBP Robot::updateHorizon() logic exactly (lines 327-343)
-    // NO optimization call - matching GBP approach
-    if (waypoints_.empty()) {
-        return;  // No target waypoint, nothing to do
-    }
     
     // Get last variable (horizon) - equivalent to GBP's getVar(-1)
     gtsam::Vector4 horizon_state = getCurrentOptimizedState(num_variables_ - 1);
