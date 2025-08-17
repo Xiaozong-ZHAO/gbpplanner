@@ -16,11 +16,11 @@ class Payload;
 
 class RobotGTSAM {
 public:
-    RobotGTSAM(const gtsam::Vector4& start_state, 
-               const gtsam::Vector4& target_state,
-               Simulator* sim = nullptr,
-               Color color = DARKGREEN,
+    RobotGTSAM(Simulator* sim, 
+               int robot_id,
+               std::deque<Eigen::VectorXd> waypoints,
                float robot_radius = 1.0f,
+               Color color = DARKGREEN,
                b2World* physicsWorld = nullptr,
                Payload* payload = nullptr,
                const Eigen::Vector2d& contact_point = Eigen::Vector2d::Zero());
@@ -50,9 +50,10 @@ private:
     
     // Visualization data (matching Robot.cpp)
     Simulator* sim_;
+    int robot_id_;
     Eigen::Vector2d current_position_;
     std::vector<Eigen::Vector2d> trajectory_;
-    std::deque<Eigen::VectorXd> waypoints_;
+    std::deque<Eigen::VectorXd> waypoints_;  // Waypoint system matching Robot.cpp
     Color color_;
     float robot_radius_;
     float height_3D_;
@@ -67,11 +68,12 @@ private:
     // Payload coupling parameters
     Payload* payload_;              // Reference to payload for trajectory planning
     Eigen::Vector2d contact_point_local_;  // Robot's contact point in payload frame (r_i)
+    Eigen::VectorXd start_waypoint_;  // Starting waypoint for variable creation
     
     // Helper methods
-    void createVariables(const gtsam::Vector4& start_state, const gtsam::Vector4& target_state);
+    void createVariables();
     void createFactors();
-    void initializeVisualization(const gtsam::Vector4& start_state, const gtsam::Vector4& target_state);
+    void initializeVisualization();
     
     // Implementation details (formerly public methods)
     void optimize();                           // Internal optimization call

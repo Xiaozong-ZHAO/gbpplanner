@@ -548,27 +548,25 @@ void Simulator::createOrDeleteRobotsGTSAM(){
             // Calculate contact point in payload frame (r_i) - matching Robot.cpp logic
             Eigen::Vector2d r_i = contact_point - payload_centroid;
             
-            // Robot initial position at contact point
-            Eigen::Vector2d robot_start_pos = contact_point;
-            
-            // Define start state [x, y, xdot, ydot]
-            gtsam::Vector4 start_state;
-            start_state << robot_start_pos.x(), robot_start_pos.y(), 0.0, 0.0;
+            // Create waypoints exactly like GBP Robot creation (matching Simulator.cpp:437-476)
+            Eigen::VectorXd starting(4);
+            starting << contact_point.x(), contact_point.y(), 0.0, 0.0;
 
             // Calculate target position using same logic as GBP
             Eigen::Vector2d relative_r = payload_R * (contact_point - payload_centroid);
-            
-            // Define target state [x, y, xdot, ydot] 
-            gtsam::Vector4 target_state;
-            target_state << payload_target.x() + relative_r.x(), 
-                           payload_target.y() + relative_r.y(),
-                           0.0, 0.0;
+            Eigen::VectorXd ending(4);
+            ending << payload_target.x() + relative_r.x(), 
+                      payload_target.y() + relative_r.y(),
+                      0.0, 0.0;
+
+            // Create waypoints deque (start and target)
+            std::deque<Eigen::VectorXd> waypoints{starting, ending};
 
             // Create robot color based on contact point index
             Color robot_color = ColorFromHSV(contact_point_index * 360.0f / contact_points.size(), 1.0f, 0.75f);
             
-            // Create GTSAM robot with payload coupling support
-            auto robot_gtsam = std::make_shared<RobotGTSAM>(start_state, target_state, this, robot_color, robot_radius, getPhysicsWorld(), payload.get(), r_i);
+            // Create GTSAM robot with waypoint system (matching GBP Robot constructor)
+            auto robot_gtsam = std::make_shared<RobotGTSAM>(this, next_rid_, waypoints, robot_radius, robot_color, getPhysicsWorld(), payload.get(), r_i);
             
             robots_gtsam_[next_rid_++] = robot_gtsam;
             
@@ -590,10 +588,10 @@ void Simulator::timestepGTSAM() {
     // Physics sync before optimization
     syncGTSAMPhysicsToLogical();
     
-    // Core GTSAM operations  
+    // Core GTSAM operations (matching GBP order: horizon first, then current)
     updateDistributedPayloadControlGTSAM();
-    optimizeAllGTSAMRobots();
-    updateGTSAMRobotStates();
+    updateGTSAMRobotStates();      // updateHorizon() first (like GBP)
+    optimizeAllGTSAMRobots();      // updateCurrent() second (like GBP)
     
     // Physics sync after optimization
     syncGTSAMLogicalToPhysics();

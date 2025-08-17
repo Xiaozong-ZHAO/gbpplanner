@@ -13,15 +13,16 @@
 
 extern Globals globals;
 
-RobotGTSAM::RobotGTSAM(const gtsam::Vector4& start_state, 
-                       const gtsam::Vector4& target_state,
-                       Simulator* sim,
-                       Color color,
+RobotGTSAM::RobotGTSAM(Simulator* sim, 
+                       int robot_id,
+                       std::deque<Eigen::VectorXd> waypoints,
                        float robot_radius,
+                       Color color,
                        b2World* physicsWorld,
                        Payload* payload,
                        const Eigen::Vector2d& contact_point)
-    : sim_(sim), color_(color), robot_radius_(robot_radius), 
+    : sim_(sim), robot_id_(robot_id), waypoints_(waypoints), 
+      color_(color), robot_radius_(robot_radius), 
       physicsWorld_(physicsWorld), physicsBody_(nullptr), 
       usePhysics_(physicsWorld != nullptr), payload_joint_(nullptr),
       payload_(payload), contact_point_local_(contact_point) {
@@ -31,15 +32,20 @@ RobotGTSAM::RobotGTSAM(const gtsam::Vector4& start_state,
     std::vector<int> timesteps = getVariableTimesteps(globals.T_HORIZON / globals.T0, globals.LOOKAHEAD_MULTIPLE);
     num_variables_ = timesteps.size();
     
+    // Extract start and target from waypoints (matching Robot.cpp:30-32)
+    start_waypoint_ = waypoints_[0];  // First waypoint = start (store for createVariables)
+    waypoints_.pop_front();           // Remove start waypoint
+    // Target waypoint remains in waypoints_.front() for updateHorizon()
+    
     // Initialize visualization
-    initializeVisualization(start_state, target_state);
+    initializeVisualization();
     
     // Create physics body if physics is enabled
     if (usePhysics_) {
         createPhysicsBody();
     }
     
-    createVariables(start_state, target_state);
+    createVariables();
     createFactors();
 }
 
@@ -63,9 +69,17 @@ std::vector<int> RobotGTSAM::getVariableTimesteps(int lookahead_horizon, int loo
     return var_list;
 }
 
-void RobotGTSAM::createVariables(const gtsam::Vector4& start_state, const gtsam::Vector4& target_state) {
+void RobotGTSAM::createVariables() {
     // Get timesteps using GBP logic with globals configuration
     std::vector<int> timesteps = getVariableTimesteps(globals.T_HORIZON / globals.T0, globals.LOOKAHEAD_MULTIPLE);
+    
+    // Use start_waypoint_ and waypoints_.front() as target (after pop_front in constructor)
+    Eigen::VectorXd target_waypoint = waypoints_.empty() ? Eigen::VectorXd::Zero(4) : waypoints_.front();  // Target state
+    
+    gtsam::Vector4 start_state;
+    start_state << start_waypoint_(0), start_waypoint_(1), start_waypoint_(2), start_waypoint_(3);
+    gtsam::Vector4 target_state;
+    target_state << target_waypoint(0), target_waypoint(1), target_waypoint(2), target_waypoint(3);
     
     // Create variables with payload-coupled trajectory planning (matching Robot.cpp:65-120)
     for (int i = 0; i < num_variables_; i++) {
@@ -204,8 +218,38 @@ void RobotGTSAM::updateCurrent() {
 }
 
 void RobotGTSAM::updateHorizon() {
-    // Update horizon state - this is where full optimization happens (less frequently)
-    // This matches Robot.cpp's approach where planning happens less frequently than state updates
+    // Implement GBP Robot::updateHorizon() logic exactly (lines 327-343)
+    if (waypoints_.empty()) {
+        // No target waypoint, just optimize
+        optimize();
+        updateVisualization();
+        return;
+    }
+    
+    // Get last variable (horizon) - matching GBP logic
+    gtsam::Vector4 horizon_state = getCurrentOptimizedState(num_variables_ - 1);
+    
+    // Horizon moves toward the waypoint (robot's target) - same as GBP
+    Eigen::VectorXd waypoint_target = waypoints_.front();  // Target position
+    Eigen::Vector2d dist_horz_to_goal = waypoint_target.head<2>() - horizon_state.head<2>().cast<double>();
+    
+    // Calculate new velocity (capped at MAX_SPEED) - same as GBP
+    Eigen::Vector2d new_vel = dist_horz_to_goal.normalized() * std::min((double)globals.MAX_SPEED, dist_horz_to_goal.norm());
+    Eigen::Vector2d new_pos = horizon_state.head<2>().cast<double>() + new_vel * globals.TIMESTEP;
+    
+    // Update horizon variable prior - same as GBP's change_variable_prior()
+    gtsam::Vector4 new_horizon;
+    new_horizon << new_pos.x(), new_pos.y(), new_vel.x(), new_vel.y();
+    updateVariablePrior(num_variables_ - 1, new_horizon);
+    
+    // If the horizon has reached the waypoint, pop that waypoint (same as GBP)
+    if (dist_horz_to_goal.norm() < robot_radius_) {
+        if (waypoints_.size() > 1) {
+            waypoints_.pop_front();
+        }
+    }
+    
+    // Run optimization with updated horizon
     optimize();
     updateVisualization();
 }
@@ -234,20 +278,12 @@ void RobotGTSAM::optimize() {
 // Visualization Methods (matching Robot.cpp functionality)
 /********************************************************************************************/
 
-void RobotGTSAM::initializeVisualization(const gtsam::Vector4& start_state, const gtsam::Vector4& target_state) {
-    // Initialize visualization data
-    current_position_ = Eigen::Vector2d(start_state(0), start_state(1));
+void RobotGTSAM::initializeVisualization() {
+    // Initialize visualization data using start waypoint
+    current_position_ = Eigen::Vector2d(start_waypoint_(0), start_waypoint_(1));
+    
     height_3D_ = robot_radius_;
     interrobot_comms_active_ = true;
-    
-    // Add start and target as waypoints
-    Eigen::VectorXd start_waypoint(4);
-    start_waypoint << start_state(0), start_state(1), start_state(2), start_state(3);
-    waypoints_.push_back(start_waypoint);
-    
-    Eigen::VectorXd target_waypoint(4);
-    target_waypoint << target_state(0), target_state(1), target_state(2), target_state(3);
-    waypoints_.push_back(target_waypoint);
     
     // Initialize trajectory with starting position
     trajectory_.push_back(current_position_);
