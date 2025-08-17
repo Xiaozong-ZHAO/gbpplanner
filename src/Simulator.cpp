@@ -585,21 +585,30 @@ void Simulator::createOrDeleteRobotsGTSAM(){
 // GTSAM timestep implementation - centralized optimization approach
 /*******************************************************************************/
 void Simulator::timestepGTSAM() {
-    // Physics sync before optimization
-    syncGTSAMPhysicsToLogical();
     
     // Core GTSAM operations (matching GBP architecture)
     updateDistributedPayloadControlGTSAM();
-    updateGTSAMRobotStates();        // updateHorizon() first (like GBP)
-    updateAllGTSAMRobotsCurrent();   // updateCurrent() second (like GBP)
-    optimizeAllGTSAMRobots();        // GTSAM optimization (equivalent to iterateGBP)
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    for (auto& [rid, robot_gtsam_] : robots_gtsam_) {
+        robot_gtsam_->optimize();
+    }
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    gbp_duration_microseconds_ = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
     
-    // Physics sync after optimization
-    syncGTSAMLogicalToPhysics();
-    
+    for (auto& [rid, robot_gtsam] : robots_gtsam_) {
+        robot_gtsam->updateHorizon();
+        robot_gtsam->updateCurrent();
+    }
+
     // Physics world step (if physics enabled)
     if (physicsWorld_) {
         physicsWorld_->Step(globals.TIMESTEP, 6, 2);
+    }
+
+    for (auto& [rid, robot_gtsam] : robots_gtsam_) {
+        robot_gtsam->syncPhysicsToLogical();
     }
     
     // Update payload states from physics (matching existing timestep)
