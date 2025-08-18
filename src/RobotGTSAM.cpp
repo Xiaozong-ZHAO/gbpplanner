@@ -28,9 +28,8 @@ RobotGTSAM::RobotGTSAM(Simulator* sim,
       payload_(payload), contact_point_local_(contact_point) {
     
     // Calculate parameters from globals (matching GBP logic)
-    dt_ = globals.T0;
-    std::vector<int> timesteps = getVariableTimesteps(globals.T_HORIZON / globals.T0, globals.LOOKAHEAD_MULTIPLE);
-    num_variables_ = timesteps.size();
+    timesteps_ = getVariableTimesteps(globals.T_HORIZON / globals.T0, globals.LOOKAHEAD_MULTIPLE);
+    num_variables_ = timesteps_.size();
     
     // Extract start and target from waypoints (matching Robot.cpp:30-32)
     start_waypoint_ = waypoints_[0];  // First waypoint = start (store for createVariables)
@@ -70,8 +69,7 @@ std::vector<int> RobotGTSAM::getVariableTimesteps(int lookahead_horizon, int loo
 }
 
 void RobotGTSAM::createVariables() {
-    // Get timesteps using GBP logic with globals configuration
-    std::vector<int> timesteps = getVariableTimesteps(globals.T_HORIZON / globals.T0, globals.LOOKAHEAD_MULTIPLE);
+    // Use stored timesteps_ instead of recalculating
     
     // Use start_waypoint_ and waypoints_.front() as target (after pop_front in constructor)
     Eigen::VectorXd target_waypoint = waypoints_.empty() ? Eigen::VectorXd::Zero(4) : waypoints_.front();  // Target state
@@ -92,11 +90,11 @@ void RobotGTSAM::createVariables() {
             
             if (contact_points.empty()) {
                 // Fallback to linear interpolation if no contact points
-                float t = (float)timesteps[i] / (float)timesteps.back();
+                float t = (float)timesteps_[i] / (float)timesteps_.back();
                 interpolated_state = start_state + t * (target_state - start_state);
             } else {
                 // Rigid body interpolation for payload formation
-                float t = (float)(timesteps[i] * globals.T0 / globals.T_HORIZON);
+                float t = (float)(timesteps_[i] * globals.T0 / globals.T_HORIZON);
                 
                 // Get payload motion parameters
                 Eigen::Vector2d P_start = payload_->getPosition();
@@ -138,7 +136,7 @@ void RobotGTSAM::createVariables() {
             }
         } else {
             // Original linear interpolation for non-payload formations
-            float t = (float)timesteps[i] / (float)timesteps.back();
+            float t = (float)timesteps_[i] / (float)timesteps_.back();
             interpolated_state = start_state + t * (target_state - start_state);
         }
         
@@ -169,12 +167,13 @@ void RobotGTSAM::createFactors() {
         initial_estimate_.at<gtsam::Vector4>(gtsam::Symbol('x', num_variables_ - 1)), 
         horizon_prior_noise_));
     
-    // Add dynamics factors between consecutive variables
+    // Add dynamics factors between consecutive variables with variable dt (matching Robot.cpp)
     for (int i = 0; i < num_variables_ - 1; i++) {
+        double delta_t = globals.T0 * (timesteps_[i + 1] - timesteps_[i]);  // Variable time spacing
         graph_.add(std::make_shared<DynamicsFactor>(
             gtsam::Symbol('x', i), 
             gtsam::Symbol('x', i + 1), 
-            dt_, 
+            delta_t, 
             dynamics_noise));
     }
 }

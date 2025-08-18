@@ -48,7 +48,7 @@ private:
     gtsam::NonlinearFactorGraph graph_;
     gtsam::Values initial_estimate_;
     gtsam::Values optimization_result_;
-    double dt_;
+    std::vector<int> timesteps_;    // Variable timesteps for non-uniform spacing
     int num_variables_;
     
     // Visualization data (matching Robot.cpp)
