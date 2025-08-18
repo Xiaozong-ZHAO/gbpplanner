@@ -348,7 +348,8 @@ void RobotGTSAM::createPhysicsBody(){
 
 void RobotGTSAM::syncLogicalToPhysics(){
     if (!usePhysics_ || !physicsBody_) return;
-    
+    physicsBody_->SetTransform(b2Vec2(current_position_(0), current_position_(1)), 0.0f);
+
     // Get current optimized state [x, y, xdot, ydot]
     gtsam::Vector4 current_state = getCurrentOptimizedState();
     
@@ -356,7 +357,6 @@ void RobotGTSAM::syncLogicalToPhysics(){
     b2Vec2 desiredVel(current_state(2), current_state(3));
     
     physicsBody_->SetLinearVelocity(desiredVel);
-    std::cout << "syncLogicalToPhysics is running..." << std::endl;
 }
 
 void RobotGTSAM::syncPhysicsToLogical(){
