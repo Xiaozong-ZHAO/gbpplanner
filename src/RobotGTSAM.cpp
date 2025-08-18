@@ -1,5 +1,6 @@
 #include "RobotGTSAM.h"
 #include "DynamicsFactor.h"
+#include "ObstacleFactor.h"
 #include <Globals.h>
 #include <Simulator.h>
 #include <Payload.h>
@@ -176,6 +177,24 @@ void RobotGTSAM::createFactors() {
             delta_t, 
             dynamics_noise));
     }
+    
+    // Add obstacle factors for all variables excluding start and horizon (matching Robot.cpp)
+    // Robot.cpp: for (int i = 1; i < num_variables_-1; i++)
+    gtsam::SharedNoiseModel obstacle_noise = 
+        gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector1::Constant(globals.SIGMA_FACTOR_OBSTACLE));
+    
+    for (int i = 1; i < num_variables_ - 1; i++) {
+        int num_obs = sim_->obstacles_.size();
+        for (int o_id = 0; o_id < num_obs; o_id++) {
+            auto obstacle_factor = ObstacleFactor::create(
+                gtsam::Symbol('x', i),
+                o_id,
+                sim_,
+                obstacle_noise
+            );
+            graph_.add(obstacle_factor);
+        }
+    }
 }
 
 /********************************************************************************************/
@@ -348,7 +367,7 @@ void RobotGTSAM::createPhysicsBody(){
 
 void RobotGTSAM::syncLogicalToPhysics(){
     if (!usePhysics_ || !physicsBody_) return;
-    physicsBody_->SetTransform(b2Vec2(current_position_(0), current_position_(1)), 0.0f);
+    // physicsBody_->SetTransform(b2Vec2(current_position_(0), current_position_(1)), 0.0f);
 
     // Get current optimized state [x, y, xdot, ydot]
     gtsam::Vector4 current_state = getCurrentOptimizedState();

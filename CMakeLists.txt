@@ -32,11 +32,13 @@ add_executable(gbpplanner
  src/Payload.cpp
  src/RobotGTSAM.cpp
  src/DynamicsFactor.cpp
+ src/ObstacleFactor.cpp
 )
 add_executable( test_gtsam
     src/test.cpp
     src/RobotGTSAM.cpp
     src/DynamicsFactor.cpp
+    src/ObstacleFactor.cpp
     src/Globals.cpp
     src/Utils.cpp
     src/Simulator.cpp
