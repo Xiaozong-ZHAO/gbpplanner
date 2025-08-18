@@ -55,6 +55,7 @@ private:
     Simulator* sim_;
     int robot_id_;
     Eigen::Vector2d current_position_;
+    Eigen::Vector2d previous_position_;  // For numerical derivative velocity calculation
     std::vector<Eigen::Vector2d> trajectory_;
     std::deque<Eigen::VectorXd> waypoints_;  // Waypoint system matching Robot.cpp
     Color color_;

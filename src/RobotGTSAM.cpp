@@ -211,6 +211,9 @@ void RobotGTSAM::updateCurrent() {
     gtsam::Vector4 new_prior = current_state + increment;
     updateCurrentPrior(new_prior);
     
+    // Store previous position before updating (for numerical derivative)
+    previous_position_ = current_position_;
+    
     // Real pose update
     current_position_ = current_position_ + increment.head<2>().cast<double>();
     
@@ -271,6 +274,7 @@ void RobotGTSAM::optimize() {
 void RobotGTSAM::initializeVisualization() {
     // Initialize visualization data using start waypoint
     current_position_ = Eigen::Vector2d(start_waypoint_(0), start_waypoint_(1));
+    previous_position_ = current_position_;  // Initialize previous position for numerical derivative
     
     height_3D_ = robot_radius_;
     interrobot_comms_active_ = true;
@@ -367,13 +371,10 @@ void RobotGTSAM::createPhysicsBody(){
 
 void RobotGTSAM::syncLogicalToPhysics(){
     if (!usePhysics_ || !physicsBody_) return;
-    // physicsBody_->SetTransform(b2Vec2(current_position_(0), current_position_(1)), 0.0f);
-
-    // Get current optimized state [x, y, xdot, ydot]
-    gtsam::Vector4 current_state = getCurrentOptimizedState();
     
-    // Extract velocity directly from indices 2 and 3 (same as Robot.cpp)
-    b2Vec2 desiredVel(current_state(2), current_state(3));
+    // Calculate velocity using numerical derivative of position
+    Eigen::Vector2d velocity = (current_position_ - previous_position_) / globals.TIMESTEP;
+    b2Vec2 desiredVel(velocity.x(), velocity.y());
     
     physicsBody_->SetLinearVelocity(desiredVel);
 }
