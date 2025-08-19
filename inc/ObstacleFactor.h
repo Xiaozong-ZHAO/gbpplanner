@@ -20,23 +20,11 @@
  */
 class ObstacleFactor : public gtsam::NoiseModelFactor1<gtsam::Vector4> {
 public:
-    /**
-     * Constructor
-     * @param key Key for robot state variable [x, y, vx, vy]
-     * @param obstacle_id ID of the obstacle in sim->obstacles_ vector
-     * @param sim Pointer to simulator for accessing obstacle and payload data
-     * @param model Noise model for the factor
-     */
     ObstacleFactor(gtsam::Key key, int obstacle_id, Simulator* sim, 
                    const gtsam::SharedNoiseModel& model);
 
-    /**
-     * Evaluate the factor error
-     * @param state Robot state [x, y, vx, vy]
-     * @param H Optional Jacobian output
-     */
     gtsam::Vector evaluateError(const gtsam::Vector4& state, 
-                               gtsam::OptionalMatrixType H = nullptr) const override;
+                               gtsam::OptionalMatrixType H = OptionalNone) const override;
 
     /**
      * Create a shared pointer to this factor

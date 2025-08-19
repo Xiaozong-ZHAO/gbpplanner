@@ -34,7 +34,16 @@ gtsam::Vector ObstacleFactor::evaluateError(const gtsam::Vector4& state,
     // Get current payload position (same as GBP)
     auto payload_pos_2d = sim_->payloads_.begin()->second->getPosition();
     Eigen::Vector2d payload_pos(payload_pos_2d.x(), payload_pos_2d.y());
-    
+    double d = (payload_pos - obs_pos_).norm();
+    if (H) {
+        *H = gtsam::Matrix::Zero(1, 4); // Jacobian will be 1x4
+        if (d <= D1_) {
+            // Compute Jacobian
+            Eigen::Vector2d n = (payload_pos - obs_pos_) / d; // Unit vector from obstacle to payload
+            (*H)(0, 0) = -n.x() / padding_;  // ∂h/∂x
+            (*H)(0, 1) = -n.y() / padding_;  // ∂h/∂y
+        }
+    }
     // Robot position from state
     Eigen::Vector2d robot_pos = state.head<2>();
     
@@ -42,17 +51,17 @@ gtsam::Vector ObstacleFactor::evaluateError(const gtsam::Vector4& state,
     double constraint = computeConstraint(robot_pos, payload_pos);
     
     // Compute Jacobian if requested
-    if (H) {
-        gtsam::Vector2 jac_pos = computeJacobian(robot_pos, payload_pos);
+    // if (H) {
+    gtsam::Vector2 jac_pos = computeJacobian(robot_pos, payload_pos);
         
-        // H is 1x4 matrix: [∂h/∂x, ∂h/∂y, ∂h/∂vx, ∂h/∂vy]
-        // Only position affects obstacle constraint, velocity doesn't
-        *H = gtsam::Matrix::Zero(1, 4);
-        (*H)(0, 0) = jac_pos(0);  // ∂h/∂x
-        (*H)(0, 1) = jac_pos(1);  // ∂h/∂y
+    // H is 1x4 matrix: [∂h/∂x, ∂h/∂y, ∂h/∂vx, ∂h/∂vy]
+    // Only position affects obstacle constraint, velocity doesn't
+    *H = gtsam::Matrix::Zero(1, 4);
+    (*H)(0, 0) = jac_pos(0);  // ∂h/∂x
+    (*H)(0, 1) = jac_pos(1);  // ∂h/∂y
         // (*H)(0, 2) = 0;        // ∂h/∂vx = 0
         // (*H)(0, 3) = 0;        // ∂h/∂vy = 0
-    }
+    // }
     
     // Return constraint as 1D vector (GTSAM expects Vector, GBP returns scalar)
     gtsam::Vector1 error;
